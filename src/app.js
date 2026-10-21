@@ -1115,6 +1115,7 @@ function openBox(i) {
 
 // ---------------- events ----------------
 function renderTabs() {
+  const fd = $('#fbDot'); if (fd) { const n = fbUnreadSafe(); fd.hidden = !n; fd.textContent = n; }
   const ic = {
     desk: '<path d="M4 11l8-7 8 7M6 9.5V20h12V9.5M10 20v-5h4v5"/>',
     office: '<rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V4h6v3M3 12h18"/>',
@@ -1126,11 +1127,11 @@ function renderTabs() {
     race: '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M12 13v4M8 20h8M9.5 17h5"/>',
     feedback: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   };
-  const names = { desk: 'Desk', team: 'Team', trade: 'Moves', league: 'League', race: 'GM Race', office: 'Office', feedback: 'Feedback' };
+  const names = { desk: 'Desk', team: 'Team', trade: 'Moves', league: 'League', race: 'GM Race', office: 'Office' };
   const mt = myTeam();
   let teamBadge = 0; try { if (mt && S && W && isCustom(mt) && S.phase !== 'done') teamBadge = coachCount(mt).n; } catch (x) { /* ignore */ }
   const badge = mt && S ? trades.filter(t => t.to === mt && t.status === 'pending' && !offerStale(t)).length : 0;
-  $('#tabs').innerHTML = `<div class="sidebrand">Front Office <span>'${String(meta && W ? yearOf(1) : 1997).slice(2)}</span></div>` + Object.keys(names).map(k => `<button class="tab" type="button" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ic[k]}</svg>${names[k]}${k === 'trade' && badge ? `<span class="badge">${badge}</span>` : ''}${k === 'team' && (teamBadge || unseenNotes(k)) ? `<span class="badge" title="Updates">${unseenNotes(k) || teamBadge}</span>` : ''}${k !== 'team' && !(k === 'trade' && badge) && unseenNotes(k) ? `<span class="badge">${unseenNotes(k)}</span>` : k === 'feedback' && fbUnread() ? `<span class="badge" title="New feedback">${fbUnread()}</span>` : ''}</button>`).join('');
+  $('#tabs').innerHTML = `<div class="sidebrand">Front Office <span>'${String(meta && W ? yearOf(1) : 1997).slice(2)}</span></div>` + Object.keys(names).map(k => `<button class="tab" type="button" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ic[k]}</svg>${names[k]}${k === 'trade' && badge ? `<span class="badge">${badge}</span>` : ''}${k === 'team' && (teamBadge || unseenNotes(k)) ? `<span class="badge" title="Updates">${unseenNotes(k) || teamBadge}</span>` : ''}${k !== 'team' && !(k === 'trade' && badge) && unseenNotes(k) ? `<span class="badge">${unseenNotes(k)}</span>` : ''}</button>`).join('');
 }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 3200); }
 
@@ -1179,10 +1180,11 @@ document.addEventListener('click', e => {
     case 'multiopen': openMultiSim(); break;
     case 'msgo': runMulti(+el.dataset.n); break;
     case 'msstop': if (multi) { multi.stop = true; el.disabled = true; el.textContent = 'Stopping after this season…'; } break;
-    case 'fbkind': { const t = $('#fbText'); if (t) fbDraft = t.value; fbKind = el.dataset.v; render(); break; }
+    case 'fbkind': { const t = $('#fbText'); if (t) fbDraft = t.value; fbKind = el.dataset.v; refreshFb(); break; }
     case 'fbsend': { const t = $('#fbText'); if (t) fbDraft = t.value; el.disabled = true; sendFeedback(); break; }
-    case 'fbmore': fbSent = 0; render(); break;
-    case 'fbshowdone': fbShowDone = !fbShowDone; render(); break;
+    case 'fbopen': openFeedback(); break;
+    case 'fbmore': fbSent = 0; refreshFb(); break;
+    case 'fbshowdone': fbShowDone = !fbShowDone; refreshFb(); break;
     case 'fbdone': db.doc('feedback/' + el.dataset.id).update({ done: el.dataset.v === '1' }).catch(() => toast('Could not update.')); break;
     case 'addopen': openAddPick(el.dataset.side); break;
     case 'addpick': addPick(pid, el.dataset.side); break;
@@ -4389,10 +4391,11 @@ let fbDraft = '', fbKind = 'idea', fbSent = 0, fbInbox = null, fbUnsub = null, f
 const FB_KINDS = { idea: ['💡', 'Idea'], issue: ['🐞', 'Issue'], love: ['❤️', 'Love it'] };
 function isAdmin() { return mode === 'shared' && (me.id === FB_ADMIN_ID || !!window.foAdmin); }
 function fbSeen() { return +(localGet('fb-seen') || 0); }
+function fbUnreadSafe() { try { return fbUnread(); } catch (e) { return 0; } }
 function fbUnread() { return isAdmin() && fbInbox ? fbInbox.filter(x => !x.done && x.ts > fbSeen()).length : 0; }
 function watchFeedback() {
   if (!isAdmin() || fbUnsub) return;
-  fbUnsub = db.collection('feedback').orderBy('ts', 'desc').limit(200).onSnapshot(q => { fbInbox = q.docs.map(d => Object.assign({ id: d.id }, d.data())); renderTabs(); if (tab === 'office' && officeView === 'feedback') render(); }, () => { fbInbox = []; });
+  fbUnsub = db.collection('feedback').orderBy('ts', 'desc').limit(200).onSnapshot(q => { fbInbox = q.docs.map(d => Object.assign({ id: d.id }, d.data())); renderTabs(); refreshFb(); }, () => { fbInbox = []; });
 }
 function feedbackForm() {
   if (mode !== 'shared') return `<div class="pad small">${WEB ? 'Sign in with Google to send feedback.' : 'Feedback needs the shared version of the game.'}</div>`;
@@ -4406,8 +4409,8 @@ async function sendFeedback() {
   if (text.length < 3) { toast('Write a few words first.'); return; }
   try {
     const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    await db.doc('feedback/' + id).set({ by: me.id, name: me.name || 'GM', kind: fbKind, text: text.slice(0, 2000), ts: Date.now(), tab: lastTabBeforeOffice || 'desk', league: leagueLabel(), team: myTeam() || '', era: meta && meta.era || '', app: WEB ? 'web' : 'claude' });
-    fbDraft = ''; fbSent = Date.now(); render();
+    await db.doc('feedback/' + id).set({ by: me.id, name: me.name || 'GM', kind: fbKind, text: text.slice(0, 2000), ts: Date.now(), tab: tab, league: leagueLabel(), team: myTeam() || '', era: meta && meta.era || '', app: WEB ? 'web' : 'claude' });
+    fbDraft = ''; fbSent = Date.now(); refreshFb();
   } catch (e) { toast('Could not send. Try again in a minute.'); }
 }
 let lastTabBeforeOffice = 'desk';
@@ -4418,6 +4421,8 @@ function feedbackInbox() {
   const rows = list.map(x => `<div class="item fbitem${x.done ? ' done' : ''}"><span class="fbic" aria-hidden="true">${(FB_KINDS[x.kind] || FB_KINDS.idea)[0]}</span><div class="nm"><b>${esc(x.name || 'GM')}</b>${x.ts > seen && !x.done ? ' <span class="tag mine">New</span>' : ''} <span class="muted small">${dt(x.ts)}</span><div class="fbtext">${esc(x.text || '')}</div><span class="s">${esc([x.team, x.league, x.era, x.app === 'web' ? 'website' : 'Claude', x.tab && 'from the ' + ({ desk: 'Desk', team: 'Team', trade: 'Moves', league: 'League', race: 'GM Race', office: 'Office' }[x.tab] || x.tab) + ' tab'].filter(Boolean).join(' · '))}</span></div><div class="col" style="gap:6px"><button class="btn sm" type="button" data-act="fbdone" data-id="${x.id}" data-v="${x.done ? 0 : 1}">${x.done ? 'Reopen' : 'Done'}</button></div></div>`).join('');
   return `<div class="pad row" style="padding-top:8px;align-items:center"><span class="small muted" style="flex:1">${fbInbox.filter(x => !x.done).length} open · ${fbInbox.length} total</span><button class="btn sm ghost" type="button" data-act="fbshowdone">${fbShowDone ? 'Hide done' : 'Show done'}</button></div><div class="list">${rows || (fbInbox.length ? '<div class="empty">All caught up.</div>' : '<div class="empty">Nothing yet. When friends send feedback it lands here.</div>')}</div>`;
 }
+function openFeedback() { openModal('Feedback', `<div id="fbBody">${viewFeedback()}</div>`); }
+function refreshFb() { const b = $('#fbBody'); if (b) b.innerHTML = viewFeedback(); else if (tab === 'feedback') render(); }
 function viewFeedback() {
   let h = `<section class="card"><h2>Send feedback</h2><div class="pad small muted" style="padding-top:0">Ideas, things that feel clunky, bugs, or what you love. Anything helps.</div>${feedbackForm()}</section>`;
   if (isAdmin()) {
@@ -4875,11 +4880,11 @@ function viewOffice() {
   if (!mt) {
     let h = locked() ? `<section class="card"><h2>League is full</h2><div class="pad small">The commissioner has locked this league, so every club is spoken for. You can still follow along on the League and News tabs.</div></section>`
       : `<section class="board"><div class="meta">Front office</div><div class="big">Pick your club</div><div class="small" style="color:var(--board-dim)">Every team without a GM is run by the computer. Claim one to set lineups, make trades and run the business.</div><div><button class="btn primary" data-act="claim-open" type="button">Choose a team</button></div></section>`;
-    return h + viewOwners() + viewFeedback();
+    return h + viewOwners();
   }
   const t = TEAM[mt], s = S.std[mt], f = S.fin[mt], su = setup(mt);
   const [hl, hc, hd] = health(mt), wk = weekly(mt);
-  const oseg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg seg4" role="group" aria-label="Office view"><button type="button" data-act="ov" data-v="overview" aria-pressed="${officeView === 'overview'}">Finances</button><button type="button" data-act="ov" data-v="business" aria-pressed="${officeView === 'business'}">Business</button><button type="button" data-act="ov" data-v="analysis" aria-pressed="${officeView === 'analysis'}">Analysis</button><button class="mobonly" type="button" data-act="ov" data-v="feedback" aria-pressed="${officeView === 'feedback'}">Feedback${fbUnread() ? ` <span class="badge">${fbUnread()}</span>` : ''}</button></div></div></section>`;
+  const oseg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg seg4" role="group" aria-label="Office view"><button type="button" data-act="ov" data-v="overview" aria-pressed="${officeView === 'overview'}">Finances</button><button type="button" data-act="ov" data-v="business" aria-pressed="${officeView === 'business'}">Business</button><button type="button" data-act="ov" data-v="analysis" aria-pressed="${officeView === 'analysis'}">Analysis</button></div></div></section>`;
   if (officeView === 'business') return oseg + viewBusiness();
   if (officeView === 'analysis') return oseg + viewAnalysis();
   if (officeView === 'feedback') return oseg + viewFeedback();

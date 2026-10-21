@@ -639,7 +639,7 @@ nav.tabs{background:color-mix(in srgb,var(--paper) 86%,transparent);backdrop-fil
 .empty{padding:28px 18px;font-size:14.5px}
 .builder{border-top:1px solid var(--line);background:color-mix(in srgb,var(--accent) 5%,var(--paper))}
 .bopt{display:grid;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
-.searchchip{gap:6px;padding:6px 12px}
+.searchchip{gap:6px;padding:6px 12px}.toolchips{display:inline-flex;gap:8px;align-items:center}
 .addpc{display:flex;justify-content:center}.addbtn{width:100%;border-style:dashed;color:var(--accent);font-weight:700}
 details.rosters{margin-top:4px}details.rosters>summary{cursor:pointer;list-style:none;padding:14px 16px;font-weight:700;color:var(--accent);text-align:center}
 details.rosters>summary::-webkit-details-marker{display:none}details.rosters>summary::after{content:' ▾'}details.rosters[open]>summary::after{content:' ▴'}
@@ -655,6 +655,8 @@ details.rosters>summary::-webkit-details-marker{display:none}details.rosters>sum
 .plaque .pp{font-size:13px;font-weight:600}.plaque .pc2{font-size:12.5px;line-height:1.35}.plaque .pk{font-size:12px;opacity:.75}
 .plaque:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 .msgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.msbar{height:8px;border-radius:99px;background:var(--soft);margin-top:10px;overflow:hidden}.msbar i{display:block;height:100%;background:var(--accent)}
+.fbchip{position:relative;padding:6px 10px}.fbdot{position:absolute;top:-4px;right:-4px;min-width:18px;height:18px;padding:0 5px;border-radius:99px;background:var(--bad);color:#fff;font:700 11px/18px var(--mono);text-align:center}
+#fbBody .card{box-shadow:none;border:0;border-radius:0;margin:0;background:transparent}#fbBody .card>h2{padding-top:14px}
 .cashctl{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .pcact{display:flex;gap:6px;margin:8px 0 2px}
 .sway{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--amber) 18%,transparent);font-size:14px}
@@ -684,7 +686,10 @@ details.rosters>summary::-webkit-details-marker{display:none}details.rosters>sum
   <header class="top">
     <div><div class="brand">Front Office <span>'97</span></div><div class="date" id="date">Opening Day</div></div>
     <div class="spacer"></div>
+    <span class="toolchips">
+    <button class="chip fbchip" id="fbChip" type="button" data-act="fbopen" aria-label="Send feedback" title="Send feedback"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.8.6 1.1 1.3 1.1 2.2h5c0-.9.3-1.6 1.1-2.2A6 6 0 0 0 12 3z"/></svg><span class="fbdot" id="fbDot" hidden></span></button>
     <button class="chip searchchip" id="searchChip" type="button" data-act="gsearch" aria-label="Find a player"><svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Search</span></button>
+    </span>
     <button class="chip resetchip" id="resetChip" type="button" hidden aria-label="Start over">↺</button>
     <button class="chip lgchip" id="lgChip" type="button" hidden></button>
     <button class="chip" id="meChip" type="button" hidden></button>

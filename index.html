@@ -4280,6 +4280,10 @@ function recentLeagues() {
 }
 function leagueSwitcher() {
   if (mode !== 'shared') return accessBanner();
+  if (WEB && !localGet(claimedKey())) return importCard() + leagueSwitcherBar();
+  return leagueSwitcherBar();
+}
+function leagueSwitcherBar() {
   const chips = recentLeagues().map(x => { const on = league.kind === x.kind && (x.kind !== 'custom' || league.id === x.id); return `<button type="button" class="lgpill${on ? ' on' : ''}" ${on ? 'aria-current="true"' : `data-act="pickleague" data-k="${x.kind}" data-id="${esc(x.id)}" data-name="${esc(x.name)}"`}>${x.kind === 'solo' ? '👤' : '👥'} ${esc(x.kind === 'custom' && leagueList[x.id] ? leagueList[x.id].name : x.name)}</button>`; }).join('');
   return accessBanner() + `<div class="lgbar" role="group" aria-label="Your leagues">${chips}<button type="button" class="lgpill more" data-act="leagues">All leagues…</button></div>`;
 }
@@ -5321,6 +5325,9 @@ document.addEventListener('click', e => {
     case 'vote': castVote(el.dataset.v === '1'); break;
     case 'pstab': psTab = el.dataset.v; render(); break;
     case 'hsub': histSub = el.dataset.v; render(); break;
+    case 'importopen': openImport(); break;
+    case 'importskip': localSet(claimedKey(), 'skip'); render(); break;
+    case 'importdo': doImport(el.dataset.id); break;
     case 'draft': openDraft(); break;
     case 'dtab': draftTab = el.dataset.v; paintDraft(); break;
     case 'dpos': draftPos = el.dataset.v; paintDraft(); break;
@@ -6651,7 +6658,7 @@ function viewRace() {
   h += raceChart(rows, mt);
   const rv = rivalsCard(mt);
   h += `<div class="pad small" style="padding-top:8px"><button class="lnk" type="button" data-act="history" data-v="book">Past champions</button> · <button class="lnk" type="button" data-act="history" data-v="career">Your career</button></div>`;
-  h += `<p class="pad small" style="padding-top:10px;margin:0">${bySeason.length > 1 ? (tieFor1st() && !tbw ? `<b>Dead heat</b> at the top. Game 163 decides it.` : `<b>${esc(ownerName(bySeason[0].owner))}</b> ${done ? 'wins' : 'leads'} this season.`) : 'Invite friends to claim clubs and the race is on.'}${cpuBest && cpuBest.g ? ` For reference, the best computer club (${esc(cpuBest.tid)}) is at ${r1(cpuBest.total)}.` : ''}</p>`;
+  h += `<p class="pad small" style="padding-top:10px;margin:0">${bySeason.length > 1 ? (tieFor1st() && !tbw ? `<b>Dead heat</b> at the top. Game 163 decides it.` : `<b>${esc(ownerName(bySeason[0].owner))}</b> ${bySeason[0].owner === me.id ? (done ? 'win' : 'lead') : (done ? 'wins' : 'leads')} this season.`) : 'Invite friends to claim clubs and the race is on.'}${cpuBest && cpuBest.g ? ` For reference, the best computer club (${esc(cpuBest.tid)}) is at ${r1(cpuBest.total)}.` : ''}</p>`;
   h += `<p class="pad small muted" style="padding-top:4px;margin:0">${done ? 'Final scores lock in when the commissioner closes free agency and adds them to the all-time totals.' : 'Scores move every time the league sims and lock in at the end of the season.'}</p></section>`;
   h += rv;
   // rubric
@@ -8164,6 +8171,54 @@ function draftDeskCard(mt) {
   return null;
 }
 
+// ---------------- Bring leagues over from the Claude version (web only) ----------------
+// import/claude.json holds the leagues as they were on Claude. Each GM says which club was theirs; their old
+// Claude id is swapped for their new account everywhere, the league is copied in once, and their solo league
+// comes along too.
+let importData = null;
+async function loadImport() { if (importData) return importData; const r = await fetch('import/claude.json', { cache: 'no-store' }); if (!r.ok) throw new Error('missing'); importData = await r.json(); return importData; }
+const claimedKey = () => 'claude-claimed:' + me.id;
+function importCard() {
+  if (!WEB || mode !== 'shared' || localGet(claimedKey())) return '';
+  return `<section class="card import"><div class="pad row wrap" style="padding-top:14px;gap:12px"><span style="flex:1;min-width:200px"><b>Played on the Claude version?</b><span class="small muted" style="display:block">Bring your leagues and seasons over in one tap.</span></span><button class="btn primary sm" type="button" data-act="importopen">Bring them over</button><button class="btn ghost sm" type="button" data-act="importskip">Not me</button></div></section>`;
+}
+async function openImport() {
+  let d; try { d = await loadImport(); } catch (e) { toast('Nothing to bring over right now.'); return; }
+  const rows = Object.entries(d.people).map(([id, p]) => `<button class="item improw" type="button" data-act="importdo" data-id="${esc(id)}"><span class="abbr" style="width:40px">${esc(p.tid)}</span><div class="nm"><b>${esc(p.label)}</b><span class="s">${d.solo[id] ? 'Includes your solo league' : 'League seasons and history'}</span></div><span class="chev" aria-hidden="true">›</span></button>`).join('');
+  openModal('Bring your leagues over', `<div class="pad small" style="padding-top:12px">Which club was yours? Pick yourself and everything comes with you: your club, your seasons and records${Object.keys(d.solo).length ? ', and your solo league' : ''}.</div><div class="list">${rows}</div><div class="pad small muted" style="padding-top:10px">Only pick your own club. Each club can be claimed once.</div>`);
+}
+async function doImport(cid) {
+  const d = await loadImport(), p = d.people[cid]; if (!p || busy) return;
+  busy = true; toast('Bringing your leagues over…');
+  const swap = obj => JSON.parse(JSON.stringify(obj).split(cid).join(me.id));
+  try {
+    for (const [lid, L] of Object.entries(d.leagues)) {
+      const reg = await db.doc('leagues/' + lid).get();
+      if (!reg.exists) { // first GM in: copy the whole league
+        for (const [path, doc] of Object.entries(L.docs)) await db.doc('leagues/' + lid + '/' + path).set(swap(doc));
+        await db.doc('leagues/' + lid).set(swap(L.registry));
+      } else { // already copied by a friend: just swap my old id for my account
+        const r = reg.data(); if (JSON.stringify(r).includes(me.id) && !JSON.stringify(r).includes(cid)) { /* already mine */ }
+        await db.doc('leagues/' + lid).set(swap(r));
+        for (const path of Object.keys(L.docs).filter(x => x.startsWith('teams/') || x === 'league/meta' || x === 'league/history')) {
+          const s = await db.doc('leagues/' + lid + '/' + path).get(); if (s.exists && JSON.stringify(s.data()).includes(cid)) await db.doc('leagues/' + lid + '/' + path).set(swap(s.data()));
+        }
+        const h = await db.doc('leagues/' + lid + '/league/history').get(); if (h.exists && JSON.stringify(h.data()).includes(cid)) await db.doc('leagues/' + lid + '/league/history').set(swap(h.data()));
+      }
+    }
+    const solo = d.solo[cid];
+    if (solo) {
+      const cur = await db.doc('data/users/' + me.id + '/solo/league/meta').get();
+      if (!cur.exists || confirm('Replace your current solo league with the one from the Claude version?')) for (const [path, doc] of Object.entries(solo.docs)) await db.doc('data/users/' + me.id + '/solo/' + path).set(swap(doc));
+    }
+    localSet(claimedKey(), cid);
+    closeModal();
+    busy = false;
+    if (p.league && d.leagues[p.league]) switchLeague({ kind: 'custom', id: p.league, name: d.leagues[p.league].registry.name });
+    toast('Welcome back. Your leagues are here.');
+  } catch (e) { toast('Could not finish bringing them over. Try again.'); } finally { busy = false; render(); }
+}
+
 // ---------------- In the red: recovery plan ----------------
 // Ranks every way to get cash positive (instant cash, ongoing savings) with one-tap Apply buttons,
 // plus "Apply the recovery plan" for the safe combination: revenue tweaks, budget trims, and a loan for what's left.
@@ -8290,7 +8345,7 @@ function tbCard() {
   if (tb) {
     const g = tb.games[tb.games.length - 1], w = tb.winner, lo = g.home === w ? g.away : g.home;
     const ws = g.home === w ? g.box.hs : g.box.as, ls = g.home === w ? g.box.as : g.box.hs, inn = g.box.inn;
-    return `<section class="card tbcard done"><div class="tbhead"><span class="tbbadge">Game 163 final</span><b>${esc(ownerName(ownerOf(w)))} wins the ${yr} GM Race</b><span class="small">${esc(TEAM[w].city)} ${ws}, ${esc(TEAM[lo].city)} ${ls}${inn > 9 ? ` in ${inn}` : ''}${tb.games.length > 1 ? ` · ${tb.games.length}-game stepladder` : ''}</span></div><div class="pad row wrap" style="gap:8px;padding-top:4px"><button class="btn primary" type="button" data-act="tb-watch">▶ Watch the replay</button></div></section>`;
+    return `<section class="card tbcard done"><div class="tbhead"><span class="tbbadge">Game 163 final</span><b>${ownerOf(w) === me.id ? 'You win' : esc(ownerName(ownerOf(w))) + ' wins'} the ${yr} GM Race</b><span class="small">${esc(TEAM[w].city)} ${ws}, ${esc(TEAM[lo].city)} ${ls}${inn > 9 ? ` in ${inn}` : ''}${tb.games.length > 1 ? ` · ${tb.games.length}-game stepladder` : ''}</span></div><div class="pad row wrap" style="gap:8px;padding-top:4px"><button class="btn primary" type="button" data-act="tb-watch">▶ Watch the replay</button></div></section>`;
   }
   const [a, b] = tie.rows, edge = a.total - b.total;
   const side = r => { const ace = aceOf(r.tid); return `<div class="tbside"><div class="tbtid">${esc(r.tid)}</div><b>${esc(ownerName(r.owner))}</b><span class="small">${S.std[r.tid][0]}-${S.std[r.tid][1]} · run diff ${(S.std[r.tid][2] - S.std[r.tid][3] > 0 ? '+' : '') + (S.std[r.tid][2] - S.std[r.tid][3])}</span><div class="tbsplit"><span>Win <b>${Math.round(r.win)}</b></span><span>Biz <b>${Math.round(r.biz)}</b></span><span>Fans <b>${Math.round(r.fans)}</b></span></div><span class="small">Ace: <b>${esc(P[ace].name)}</b>${aceLine(ace) ? ` (${aceLine(ace)})` : ''}</span></div>`; };
@@ -8378,7 +8433,7 @@ function watchTiebreak() {
     const ws = g.home === w ? g.box.hs : g.box.as, ls = g.home === w ? g.box.as : g.box.hs;
     const dec = g.box.dec, walkoff = g.winner === g.home && g.log.length && g.log[g.log.length - 1][1] === 1 && g.log[g.log.length - 1][4] > 0 && g.log[g.log.length - 1][0] >= 9;
     const conf = Array.from({ length: 36 }, (_, k) => `<i style="left:${(k * 37) % 100}%;animation-delay:${(k % 9) * 0.12}s;background:${['var(--accent)', 'var(--gold)', '#2f8f5b', 'var(--ink)'][k % 4]}"></i>`).join('');
-    el.innerHTML = tbBoardHTML(g, g.log.length) + `<div class="tbwin"><div class="confetti" aria-hidden="true">${conf}</div><div class="tbtrophy" aria-hidden="true">🏆</div><div class="tbbig">${esc(ownerName(ownerOf(w)))}</div><div>wins the ${yearOf(seasonNo())} GM Race</div><div class="small" style="margin-top:6px">${walkoff ? '<b>WALK-OFF!</b> ' : ''}${esc(TEAM[w].city)} ${ws}, ${esc(TEAM[lo].city)} ${ls}${g.box.inn > 9 ? ` in ${g.box.inn} innings` : ''}. W: ${esc(P[dec[0]].name)} · L: ${esc(P[dec[1]].name)}${dec[2] != null ? ` · S: ${esc(P[dec[2]].name)}` : ''}</div></div>
+    el.innerHTML = tbBoardHTML(g, g.log.length) + `<div class="tbwin"><div class="confetti" aria-hidden="true">${conf}</div><div class="tbtrophy" aria-hidden="true">🏆</div><div class="tbbig">${esc(ownerName(ownerOf(w)))}</div><div>${ownerOf(w) === me.id ? 'win' : 'wins'} the ${yearOf(seasonNo())} GM Race</div><div class="small" style="margin-top:6px">${walkoff ? '<b>WALK-OFF!</b> ' : ''}${esc(TEAM[w].city)} ${ws}, ${esc(TEAM[lo].city)} ${ls}${g.box.inn > 9 ? ` in ${g.box.inn} innings` : ''}. W: ${esc(P[dec[0]].name)} · L: ${esc(P[dec[1]].name)}${dec[2] != null ? ` · S: ${esc(P[dec[2]].name)}` : ''}</div></div>
       <div class="tbfeed">${tbRun ? tbRun.feed.filter(f => f.big).slice(-4).reverse().map(f => `<div class="${f.cls}">${f.txt}</div>`).join('') : ''}</div>
       <div class="pad row" style="gap:8px;padding-top:10px"><button class="btn" type="button" data-act="tb-watch">Watch again</button><button class="btn primary" type="button" data-act="close">Done</button></div>`;
     if (tbRun) clearTimeout(tbRun.t);

@@ -4411,7 +4411,7 @@ function openLeaguePicker() {
     ${league.kind === 'custom' && leagueList[league.id] ? `<div class="pad" style="padding-top:14px"><button class="btn" type="button" data-act="invite">Invite friends to ${esc(leagueLabel())}</button></div>` : ''}`;
   const ids = all.map(([, x]) => x.commish).filter(Boolean);
   if (ids.length) resolveProfilesFor(ids);
-  openModal('Your leagues', body + (WEB ? `<div class="pad small muted row wrap" style="padding-top:12px;border-top:1px solid var(--line);gap:8px"><span style="flex:1">Signed in as <b>${esc(me.name || 'you')}</b></span><button class="btn sm ghost" type="button" onclick="window.foSignOut&&window.foSignOut()">Sign out</button></div>` : ''));
+  openModal('Your leagues', body + (!WEB ? `<div class="pad small row wrap" style="padding-top:12px;border-top:1px solid var(--line);gap:8px"><span style="flex:1;min-width:180px"><b>Moving to the new site?</b> Send your solo league over so it comes with you.</span><button class="btn sm" type="button" data-act="sendsolo">Send my solo league</button></div>` : '') + (WEB ? `<div class="pad small muted row wrap" style="padding-top:12px;border-top:1px solid var(--line);gap:8px"><span style="flex:1">Signed in as <b>${esc(me.name || 'you')}</b></span><button class="btn sm ghost" type="button" onclick="window.foSignOut&&window.foSignOut()">Sign out</button></div>` : ''));
 }
 async function resolveProfilesFor(ids) { if (!user || !ids.length) return; try { const ps = await user.profiles(ids.filter(Boolean)); Object.assign(profiles, ps); } catch (e) { /* ignore */ } }
 function dbErr(e) { if (e && e.code === 'revoked') toast('This league is no longer shared with you.'); }
@@ -5326,6 +5326,7 @@ document.addEventListener('click', e => {
     case 'pstab': psTab = el.dataset.v; render(); break;
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
+    case 'sendsolo': sendSoloToWeb(); break;
     case 'importskip': localSet(claimedKey(), 'skip'); render(); break;
     case 'importdo': doImport(el.dataset.id); break;
     case 'draft': openDraft(); break;
@@ -8219,6 +8220,19 @@ async function doImport(cid) {
   } catch (e) { toast('Could not finish bringing them over. Try again.'); } finally { busy = false; render(); }
 }
 
+// ---------------- Claude version: send your private solo league to the new site ----------------
+async function sendSoloToWeb() {
+  if (WEB || mode !== 'shared' || busy) return;
+  busy = true; toast('Packing up your solo league…');
+  try {
+    const base = 'data/users/' + me.id + '/solo/', out = {};
+    for (const d of ['meta', 'state', 'box', 'farm', 'history', 'draft']) { const s = await db.doc(base + 'league/' + d).get(); if (s.exists) out['league/' + d] = s.data(); }
+    const t = await db.collection(base + 'teams').get(); t.docs.forEach(x => { out['teams/' + x.id] = x.data(); });
+    if (!out['league/meta']) { toast("You don't have a solo league to send."); return; }
+    await db.doc('transfer/' + me.id).set({ docs: out, name: me.name || '', ts: Date.now() });
+    toast('Sent. Tell Sam it is ready to bring over.');
+  } catch (e) { toast('Could not send it. Try again.'); } finally { busy = false; }
+}
 // ---------------- In the red: recovery plan ----------------
 // Ranks every way to get cash positive (instant cash, ongoing savings) with one-tap Apply buttons,
 // plus "Apply the recovery plan" for the safe combination: revenue tweaks, budget trims, and a loan for what's left.

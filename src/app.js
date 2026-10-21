@@ -901,7 +901,7 @@ function viewTrade() {
   const cashCtl = `<div class="cashrow"><span class="small" style="flex:1;min-width:120px">Cash in the deal</span><button class="btn icon" type="button" data-act="cashstep" data-d="-1" aria-label="More cash to you">−</button><b class="num" style="min-width:150px;text-align:center">${tradeCash === 0 ? 'None' : tradeCash > 0 ? 'You send ' + money(tradeCash) : 'You get ' + money(-tradeCash)}</b><button class="btn icon" type="button" data-act="cashstep" data-d="1" aria-label="More cash from you">+</button></div>`;
   const deal = give.length + get.length || tradeCash ? dealCompare(give, get, mt, tradePartner, tradeCash) + `<div class="pad" style="padding-top:10px">${adviceBox(tradeAdvice(give, get, tradePartner, tradeCash), 'Your scouts on this deal')}</div>` : `<div class="pad small muted" style="padding-top:12px">Tap players in the two rosters below. The deal lines up here side by side, with this season's stats, contracts and what's still owed.</div>`;
   return `<section class="card"><h2>Trade talks</h2><div class="pad"><label class="small muted" for="partner">Trade with</label><select id="partner" style="width:100%;margin-top:4px">${TEAMS.filter(t => t.id !== mt).map(t => `<option value="${t.id}" ${t.id === tradePartner ? 'selected' : ''}>${t.city} (${t.id}) · ${rec(t.id)} · ${ownerOf(t.id) ? 'GM: ' + esc(ownerName(ownerOf(t.id))) : 'computer'}</option>`).join('')}</select></div>
-    ${deal}
+    ${deal}${get.length && !give.length ? dealBuilderCard(mt, tradePartner, get) : get.length ? `<div class="pad" style="padding-top:8px">${builderOpen === bKey(tradePartner, get) ? dealBuilderCard(mt, tradePartner, get) : `<button class="btn sm" type="button" data-act="buildopen">Find other packages</button>`}</div>` : ''}
     <div class="meter">${cashCtl}
     ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}${fb}${hint}
     <div class="row wrap"><button class="btn primary" type="button" data-act="propose" ${canSend ? '' : 'disabled'}>${po ? 'Send offer to ' + esc(ownerName(po)) : 'Propose trade'}</button>${!po ? `<button class="btn" type="button" data-act="hint">${showHint ? 'Hide hint' : 'Hint'}</button>` : ''}${give.length + get.length + (tradeCash ? 1 : 0) ? '<button class="btn ghost" type="button" data-act="clearpick">Clear</button>' : ''}</div></div></section>
@@ -1166,6 +1166,9 @@ document.addEventListener('click', e => {
     case 'pstab': psTab = el.dataset.v; render(); break;
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
+    case 'buildopen': { builderOpen = bKey(tradePartner, [...tradeGet]); el.disabled = true; el.textContent = 'Your scouts are working the phones…'; setTimeout(() => render(), 30); break; }
+    case 'buildclose': builderOpen = ''; render(); break;
+    case 'builduse': useDeal(i); break;
     case 'sendsolo': sendSoloToWeb(); break;
     case 'importskip': localSet(claimedKey(), 'skip'); render(); break;
     case 'importdo': doImport(el.dataset.id); break;
@@ -4073,6 +4076,117 @@ async function sendSoloToWeb() {
     toast('Sent. Tell Sam it is ready to bring over.');
   } catch (e) { toast('Could not send it. Try again.'); } finally { busy = false; }
 }
+// ---------------- Deal builder: "who do I give up?" ----------------
+// Pick the player(s) you want; your scouts try every sensible package from your roster and farm, keep the
+// ones the other GM accepts, and rank them by what each does to your team this season.
+let builder = null; // { key, opts }
+function rosterRating(mt, roster) {
+  const r = roster.filter(id => P[id] && !injDays(id));
+  const lineup = FO.autoLineup(P, r), st = FO.autoStaff(P, r);
+  const pen = r.filter(id => P[id].t === 'P' && !st.rotation.includes(id));
+  const u = unitRatings(mt, { lineup, rotation: st.rotation, pen, closer: st.closer });
+  const bat = POS9.reduce((a, p) => a + (u[p] ? u[p].ovr : 40), 0) / 9;
+  return { bat: bat * 0.52, pit: u.SP.ovr * 0.33 + u.RP.ovr * 0.15, lineup, st };
+}
+const WINS_PER_PT = () => 0.013 * LEN(); // matches the projection model: one point of team rating ≈ 2 wins over 162
+function dealImpact(mt, give, get) {
+  const now = rosterOf(mt), after = now.filter(id => !give.includes(id)).concat(get.filter(id => !farmOrg(id)));
+  const a = rosterRating(mt, now), b = rosterRating(mt, after);
+  const k = WINS_PER_PT();
+  return { hit: (b.bat - a.bat) * k, pit: (b.pit - a.pit) * k, total: (b.bat + b.pit - a.bat - a.pit) * k };
+}
+function buildDeals(mt, tid, get) {
+  const key = [mt, tid, get.slice().sort().join('.'), S.day, seasonNo(), rosterOf(mt).length, cashOf(mt) > 0].join('|');
+  if (builder && builder.key === key) return builder.opts;
+  const human = !!ownerOf(tid), ctx = ctxFor(tid);
+  const healthy = rosterOf(mt).filter(id => !injDays(id));
+  const best = rosterRating(mt, healthy), lineupIds = new Set(best.lineup.map(x => x[0])), rot = new Set(best.st.rotation);
+  const top3 = new Set(healthy.slice().sort((a, b) => P[b].ovr - P[a].ovr).slice(0, 3));
+  const farmPool = farmOf(mt).filter(id => !minorsOf(mt).includes(id));
+  const spare = healthy.filter(id => !lineupIds.has(id) && !rot.has(id) && id !== best.st.closer);
+  const starters = healthy.filter(id => !top3.has(id) && !spare.includes(id));
+  const mv = id => myValue([id], false);
+  const fcost = id => farmOrg(id) ? potSeen(id) : Math.max(sOvr(id), P[id].pros ? potSeen(id) : 0); // what it feels like to give him up
+  const accepts = (give, cash) => {
+    const legal = FO.evalTrade(W, rosterOf(mt), rosterOf(tid), mlbOf(give, mt), mlbOf(get, tid));
+    if (legal.errFrom || legal.errTo) return false;
+    if (cash > 0 && cash > cashOf(mt)) return false;
+    return FO.aiEvaluate(W, ctx, give.map(pinfo), get.map(pinfo), cash).accept;
+  };
+  // try singles, pairs and a few triples from a pool; keep every package the other GM would take
+  const search = (pool, cashSteps) => {
+    const all = [...new Set(pool)], c = all.slice().sort((a, b) => mv(b) - mv(a)).slice(0, 16), found = []; // most valuable pieces first: stars cost real players
+    const tryIt = (give, cash) => { if (accepts(give, cash)) found.push({ give, cash }); };
+    for (const cash of cashSteps) {
+      for (const a of all) tryIt([a], cash);
+      for (let i = 0; i < c.length; i++) for (let j = i + 1; j < c.length; j++) tryIt([c[i], c[j]], cash);
+      if (found.length < 3) for (let i = 0; i < Math.min(10, c.length); i++) for (let j = i + 1; j < Math.min(10, c.length); j++) for (let l = j + 1; l < Math.min(10, c.length); l++) tryIt([c[i], c[j], c[l]], cash);
+      if (found.length) break;
+    }
+    return found;
+  };
+  const step = 1e6 * SC(), cashLadder = [0].concat(cashOf(mt) > step ? [2, 4, 6, 8].map(n => n * step).filter(v => v <= cashOf(mt)) : []);
+  const strategies = [
+    { k: 'now', title: 'Best for this season', why: 'Keeps your team as strong as possible right now.', pool: spare.concat(farmPool, starters), cash: [0] },
+    { k: 'spare', title: 'Spare parts only', why: 'Bench players, extra arms and prospects. Your starters stay put.', pool: spare.concat(farmPool), cash: [0] },
+    { k: 'kids', title: 'Prospect package', why: 'Pay with the farm and keep the whole big-league roster.', pool: farmPool, cash: [0] },
+    { k: 'cash', title: 'Add cash', why: 'Use money to give up less talent.', pool: spare.concat(farmPool), cash: cashLadder.slice(1) },
+  ];
+  const opts = [], seen = new Set(), misses = [], allFound = [];
+  for (const s of strategies) {
+    if (!s.pool.length || !s.cash.length) continue;
+    const found = search(s.pool, s.cash);
+    if (!found.length) { misses.push(s.title.toLowerCase()); continue; }
+    // rank by effect on this season, then by future value given up
+    const scored = found.map(f => Object.assign(f, { imp: dealImpact(mt, f.give, get), val: f.give.reduce((a, id) => a + fcost(id), 0) + f.cash / step * 3 }));
+    allFound.push(...scored);
+    scored
+      .sort((x, y) => (s.k === 'kids' || s.k === 'cash' ? x.val - y.val : 0) || y.imp.total - x.imp.total || x.val - y.val);
+    const pick = scored.find(f => !seen.has(f.give.slice().sort().join('.') + ':' + f.cash));
+    if (!pick) continue;
+    seen.add(pick.give.slice().sort().join('.') + ':' + pick.cash);
+    const salIn = get.reduce((a, id) => a + (rosterOf(tid).includes(id) ? salFor(id, tid) : 0), 0), salOut = pick.give.reduce((a, id) => a + (rosterOf(mt).includes(id) ? salFor(id, mt) : 0), 0);
+    opts.push(Object.assign({}, s, pick, { pay: salIn - salOut, human }));
+  }
+  // "Best for this season" is the single best package found by any route
+  const bestNow = allFound.slice().sort((x, y) => y.imp.total - x.imp.total || x.val - y.val)[0];
+  const sig = f => f.give.slice().sort().join('.') + ':' + f.cash;
+  let final = opts.filter(o => o.k !== 'now');
+  if (bestNow) {
+    const s0 = strategies[0], salIn = get.reduce((a, id) => a + (rosterOf(tid).includes(id) ? salFor(id, tid) : 0), 0), salOut = bestNow.give.reduce((a, id) => a + (rosterOf(mt).includes(id) ? salFor(id, mt) : 0), 0);
+    final = [Object.assign({}, s0, bestNow, { pay: salIn - salOut, human })].concat(final.filter(o => sig(o) !== sig(bestNow)));
+  }
+  // drop packages that another option beats: same or better this season for less future talent
+  final = final.filter((b, i) => !final.some((a, j) => j !== i && a.imp.total >= b.imp.total - 0.05 && a.val <= b.val && (a.val < b.val || j < i)));
+  opts.length = 0; final.forEach(o => opts.push(o));
+  opts.misses = misses.filter(m => m !== strategies[0].title.toLowerCase());
+  builder = { key, opts };
+  return opts;
+}
+let builderOpen = ''; // key of the target set the builder is open for
+const bKey = (tid, get) => tid + ':' + get.slice().sort().join('.');
+function dealBuilderCard(mt, tid, get) {
+  if (!get.length || !mt || tid === mt) return '';
+  const names = get.map(id => esc(P[id].name)).join(' + ');
+  if (builderOpen !== bKey(tid, get)) return `<div class="builder pad"><button class="btn primary big" type="button" data-act="buildopen" style="width:100%">Build this deal for me</button><div class="small muted" style="margin-top:6px;text-align:center">Your scouts find packages for ${names} that won't wreck your team.</div></div>`;
+  const opts = buildDeals(mt, tid, get), human = !!ownerOf(tid);
+  const fmtW = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
+  const body = opts.length ? opts.map((o, i) => `<div class="bopt">
+      <div class="row" style="gap:8px;align-items:baseline"><b style="flex:1">${o.title}</b><span class="tag ${o.imp.total >= 0 ? 'mine' : 'red'}">${fmtW(o.imp.total)} wins</span></div>
+      <div class="small muted">${o.why}</div>
+      <div class="idealegs" style="grid-template-columns:1fr"><div class="leg"><span class="lh">You send</span>${o.give.map(id => ratedChip(id, mt)).join('')}${o.cash ? `<div class="rc"><span class="ovr">$</span><div class="nm"><b>${money(o.cash)}</b><span class="s">cash</span></div></div>` : ''}</div></div>
+      <div class="small">This season: hitting ${fmtW(o.imp.hit)}, pitching ${fmtW(o.imp.pit)} wins · payroll ${o.pay >= 0 ? '+' : '−'}${money(Math.abs(o.pay))}${human ? '' : ` · <b>${esc(TEAM[tid].city)} says yes</b>`}</div>
+      <div><button class="btn sm primary" type="button" data-act="builduse" data-i="${i}">Use this deal</button></div></div>`).join('')
+    : `<div class="small pad">Your scouts couldn't find a package ${esc(TEAM[tid].city)} would take for ${names}. ${cashOf(mt) <= 0 ? 'Getting your cash above zero opens up cash deals.' : 'Try a less expensive target, or add one of your better players yourself.'}</div>`;
+  const miss = opts.length && opts.misses && opts.misses.length ? `<div class="small muted pad" style="padding-top:8px">No luck with ${opts.misses.join(', ')}: ${esc(TEAM[tid].city)} wants more than that for ${names}.</div>` : '';
+  return `<div class="builder"><div class="row pad" style="padding-top:12px;gap:8px"><b style="flex:1">Deals for ${names}</b><button class="btn ghost sm" type="button" data-act="buildclose">Hide</button></div>${human ? `<div class="small muted pad" style="padding-top:0">${esc(ownerName(ownerOf(tid)))} decides for real. These are fair by the computer GMs' standards.</div>` : ''}${body}${miss}</div>`;
+}
+function useDeal(i) {
+  const o = builder && builder.opts[i]; if (!o) return;
+  tradeGive = new Set(o.give); tradeCash = o.cash || 0; builderOpen = ''; lastFeedback = null;
+  render(); toast('Deal loaded. Review it, then propose.');
+}
+
 // ---------------- In the red: recovery plan ----------------
 // Ranks every way to get cash positive (instant cash, ongoing savings) with one-tap Apply buttons,
 // plus "Apply the recovery plan" for the safe combination: revenue tweaks, budget trims, and a loan for what's left.

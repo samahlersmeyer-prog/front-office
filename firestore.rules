@@ -10,6 +10,12 @@ service cloud.firestore {
       allow read: if request.auth != null;
       allow write: if request.auth != null && request.auth.uid == uid;
     }
+    // Feedback: any signed-in friend can send; only Sam can read or tidy it
+    match /feedback/{id} {
+      allow create: if request.auth != null && request.resource.data.j.size() < 6000;
+      allow read, update, delete: if request.auth != null
+        && request.auth.token.email == 'sam.ahlersmeyer@gmail.com' && request.auth.token.email_verified == true;
+    }
     // League data: any signed-in player
     match /{col}/{rest=**} {
       allow read, write: if request.auth != null

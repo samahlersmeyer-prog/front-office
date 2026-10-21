@@ -50,6 +50,7 @@
       if (user) { // public profile so friends see your name
         try { await fs.setDoc(fs.doc(fdb, 'profiles/' + user.uid), { j: JSON.stringify({ name: user.displayName || 'GM', avatarUrl: user.photoURL || '' }), ts: Date.now() }); } catch (e) { /* rules not set yet */ }
       }
+      window.foAdmin = !!(user && user.email && user.email.toLowerCase() === 'sam.ahlersmeyer@gmail.com' && user.emailVerified);
       return { fs, fdb, user };
     })();
     return ready;

@@ -442,7 +442,9 @@ function render() {
   if (TEAMS.some(t => !S.std[t.id])) { m.innerHTML = `<section class="card"><div class="empty">Loading the new league…</div></section>`; return; } // era switch in flight
   sched();
   const v = { desk: viewDesk, office: viewOffice, feedback: viewFeedback, team: viewTeam, league: viewLeagueHub, trade: viewMarket, race: () => viewRace() + viewPastRaces() }[tab] || viewDesk;
+  const dkey = (d, i) => tab + ':' + d.className + ':' + i, openNow = new Set([...m.querySelectorAll('details')].map((d, i) => d.open ? dkey(d, i) : '').filter(Boolean));
   m.innerHTML = (myTeam() ? notesHTML(tab) : '') + v();
+  if (openNow.size) m.querySelectorAll('details').forEach((d, i) => { if (openNow.has(dkey(d, i))) d.open = true; }); // keep open sections open across updates
   paintSimBar();
   if (!simming && myTeam() && (autoOf(myTeam()).biz || autoOf(myTeam()).farm)) setTimeout(() => { runAutopilot(); }, 50);
   if (autoOn() && !clockBusy && (meta.auto.done || 0) < dueUpdates()) setTimeout(() => { clockTick(); }, 400);

@@ -297,7 +297,7 @@ async function resetLeague(era, el, ropts) {
     docs = nd;
     const locked = meta && meta.locked, openSim = meta && meta.openSim;
     const keepLen = meta && meta.len;
-    await startLeague(era, { locked, openSim, quiet: true, len: keepLen });
+    await startLeague(era, { locked, openSim, quiet: true, len: keepLen, keepPost: true });
     closeModal(); tab = 'desk'; renderTabs(); render(); window.scrollTo(0, 0);
     toast('New league started with ' + (era === '1997' ? '1997' : '2026') + ' rosters.' + (keep ? '' : ' Pick your club.'));
     if (!keep) setTimeout(() => openClaim(), 300);
@@ -316,7 +316,7 @@ async function startLeague(era, opts) {
   initWorld(era);
   const seed = (Math.random() * 4294967295) >>> 0;
   opts = opts || {};
-  meta = { commish: me.id, seed, created: Date.now(), openSim: !!opts.openSim, locked: !!opts.locked, season: 1, era, len: opts.len || 162 };
+  meta = { commish: me.id, seed, created: Date.now(), openSim: !!opts.openSim, locked: !!opts.locked, season: 1, era, len: opts.len || 162, post: pfPick || (meta && meta.post && opts.keepPost ? meta.post : eraFmt(era)) };
   const lenSel = document.getElementById('lenSel'); if (lenSel) meta.len = +lenSel.value;
   S = FO.newState(seed, meta.len || 162); box = { day: 0, games: [] };
   farm = null; farmLoaded = true; syncFarm();
@@ -370,7 +370,7 @@ async function sim(days, opts) {
     if (!lock.acquired) { toast('Another sim is already running.'); return; }
     const fresh = await dref('league/state').get(); if (fresh.exists) S = clone(fresh.data());
   }
-  const work = clone(S);
+  const work = clone(S); work.pfmt = postFmt();
   const pre = recapBefore(myTeam());
   if (pre) { const rr = raceTable().sort((a, b) => b.total - a.total); pre.rank = rr.findIndex(r => r.tid === pre.tid) + 1; pre.ready = farmOf(pre.tid).filter(id => isReady(id)); }
   clearSimNotes();
@@ -460,12 +460,13 @@ function viewStart() {
     <div class="meta">${mode === 'local' ? 'Solo league on this device' : league.kind === 'solo' ? 'Solo league · private to you' : esc(leagueLabel()) + ' · with friends'}</div>
     <div class="big">Pick your season</div>
     <div class="small" style="color:var(--board-dim)">Claim a club, set the lineup, work the phones for trades, sign free agents and watch the gate. ${WEB ? 'Friends who open the link and sign in can claim the other clubs' : 'Friends you share this page with can claim the other clubs'}; the computer runs the rest.</div>
-    ${can ? `<label class="small" style="color:var(--board-dim);display:grid;gap:4px;max-width:260px">Season length<select id="lenSel">${SEASON_LENS.map(([v, l]) => `<option value="${v}" ${v === 162 ? 'selected' : ''}>${l}</option>`).join('')}</select></label><div class="row wrap"><button class="btn primary" data-act="start" data-era="2026" type="button">Start with 2026 rosters</button><button class="btn" data-act="start" data-era="1997" type="button">Classic 1997 rosters</button></div>` : `<div class="small" style="color:var(--board-dim)">Waiting for the commissioner${reg ? ' (' + esc(ownerName(reg.commish)) + ')' : ''} to start the league.</div>`}
+    ${can ? `<label class="small" style="color:var(--board-dim);display:grid;gap:4px;max-width:260px">Season length<select id="lenSel">${SEASON_LENS.map(([v, l]) => `<option value="${v}" ${v === 162 ? 'selected' : ''}>${l}</option>`).join('')}</select></label>${startFmtBlock()}<div class="row wrap"><button class="btn primary" data-act="start" data-era="2026" type="button">Start with 2026 rosters</button><button class="btn" data-act="start" data-era="1997" type="button">Classic 1997 rosters</button></div>` : `<div class="small" style="color:var(--board-dim)">Waiting for the commissioner${reg ? ' (' + esc(ownerName(reg.commish)) + ')' : ''} to start the league.</div>`}
   ${mode === 'shared' ? `<div class="small" style="color:var(--board-dim)">${league.kind === 'solo' ? 'Only you can see this league.' : 'Anyone you share this app with can open this league and claim a club.'} <button class="lnk" type="button" data-act="leagues" style="color:inherit">Switch league</button></div>` : ''}
   </section>
   <section class="card"><h2>The two seasons</h2><div class="pad small">
-    <p style="margin:0 0 8px"><b>2026:</b> all 30 clubs as they finished the 2026 season, rated from their real 2026 stats. Universal DH, 12-team playoffs with a Wild Card Series, and modern payrolls.</p>
-    <p style="margin:0 0 8px"><b>1997:</b> the 28 clubs of 1997, rated from that season's stats. DH in AL parks only, 8-team playoffs.</p>
+    <p style="margin:0 0 8px"><b>2026:</b> all 30 clubs as they finished the 2026 season, rated from their real 2026 stats. Universal DH and modern payrolls.</p>
+    <p style="margin:0 0 8px"><b>1997:</b> the 28 clubs of 1997, rated from that season's stats. DH in AL parks only.</p>
+    <p style="margin:0 0 8px"><b>Playoffs:</b> pick any of three real formats for either season: 1997's 8 teams, 2012's one-game wild card, or today's 12 teams with byes.</p>
     <p class="muted" style="margin:0">Salaries are estimates scaled to each club's payroll. Whoever starts the league is the commissioner and runs the calendar.</p>
   </div></section>`;
 }
@@ -530,7 +531,7 @@ function viewStandings() {
 function viewBracket() {
   const p = S.post;
   return `<section class="card"><h2>Postseason${p.champ ? `<span class="sub">Champion: ${esc(TEAM[p.champ].city)}</span>` : ''}</h2><div class="bracket">` +
-    p.rounds.map(rd => `<div class="rd">${esc(rd.name)} · best of ${rd.best}</div>` + rd.series.map(se => `<div class="ser"><span>${esc(se.hi)} <span class="muted">vs</span> ${esc(se.lo)}</span><span>${se.w[0]}–${se.w[1]}</span></div>`).join('')).reverse().join('') + `</div></section>`;
+    p.rounds.map(rd => `<div class="rd">${esc(rd.name)} · ${rd.best === 1 ? 'one game' : 'best of ' + rd.best}</div>` + rd.series.map(se => `<div class="ser"><span>${esc(se.hi)} <span class="muted">vs</span> ${esc(se.lo)}</span><span>${se.w[0]}–${se.w[1]}</span></div>`).join('')).reverse().join('') + `</div></section>`;
 }
 function viewFeed() {
   const items = S.news.slice(0, 12).map(n => [n[0] === 0 ? 'Winter' : n[0] <= LEN() ? FO.dateOf(n[0] - 1) : 'Oct', esc(n[1])]);
@@ -1177,6 +1178,8 @@ document.addEventListener('click', e => {
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
     case 'gsearch': openSearch(); break;
+    case 'pfpick': pfPick = pfPick === el.dataset.v ? null : el.dataset.v; render(); break;
+    case 'pfset': setPostFmt(el.dataset.v); break;
     case 'multiopen': openMultiSim(); break;
     case 'msgo': runMulti(+el.dataset.n); break;
     case 'msstop': if (multi) { multi.stop = true; el.disabled = true; el.textContent = 'Stopping after this season…'; } break;
@@ -2202,7 +2205,7 @@ function strengths() {
 }
 // Simulate the rest of the regular season many times
 function playoffOdds(pct) {
-  const N = 400, slots = FO.ERA.post === '1997' ? 1 : 3;
+  const N = 400, slots = ({ '1997': 1, '2012': 2, '2022': 3 })[postFmt()] || 3;
   const res = {}; TEAMS.forEach(t => { res[t.id] = { po: 0, div: 0, ws: 0, w: 0 }; });
   const games = [];
   if (S.phase === 'season') for (let d = S.day; d < LEN(); d++) (W.sched[d] || []).forEach(g => games.push(g));
@@ -2450,7 +2453,7 @@ function gmScore(tid) {
   const pr = postResult(tid, S.post);
   const post = Math.min(20, (pr.inPO ? 6 : 0) + 3 * pr.wins + (pr.champ ? 5 : 0));
   const f = S.fin[tid], v = i => f[i] || 0;
-  const R = v(1) + v(2) + v(3) + v(9) + v(10) + Math.max(0, v(14)), E = v(4) + v(5) + v(8) + v(11) + v(12) + v(13) - Math.min(0, v(14));
+  const R = v(1) + v(2) + v(3) + v(9) + v(10) + Math.max(0, v(14)), E = v(4) + v(5) + v(8) + v(11) + v(12) + v(13) + v(15) - Math.min(0, v(14));
   const margin = R ? (R - E) / R : 0;
   const red = cashOf(tid) < 0 ? 5 : 0;
   const biz = Math.max(0, 30 * clamp01((margin + 0.1) / 0.4) - red);
@@ -2477,7 +2480,7 @@ let raceProjCache = null;
 function raceProjections() {
   const key = [S.day, S.phase, seasonNo(), S.post ? S.post.rounds.length + ':' + S.post.cur : ''].join('|');
   if (raceProjCache && raceProjCache.key === key) return raceProjCache.v;
-  const out = {}, rounds = FO.ERA.post === '1997' ? 3 : 4;
+  const out = {}, rounds = postFmt() === '1997' ? 3 : 4;
   const live = S.phase === 'season', st = live ? strengths() : null, odds = live ? playoffOdds(st.pct) : null;
   for (const t of TEAMS) {
     if (!ownerOf(t.id)) continue;
@@ -3552,7 +3555,7 @@ function charterHTML() {
 }
 function viewRules() {
   const rows = clog.slice(0, 40).map(x => `<div><span class="d">${new Date(x.ts).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}</span><span><b>${esc(ownerName(x.by))}</b>${x.comm ? ' <span class="tag">Commissioner</span>' : ''} ${esc(x.txt)}</span></div>`).join('');
-  return voteCard() + charterHTML() + `<section class="card"><h2>Commissioner log<span class="sub">every league action, for everyone to see</span></h2>${rows ? `<div class="news">${rows}</div>` : '<div class="empty">Nothing yet. Sims, rule changes, votes and roster removals show up here.</div>'}</section>`;
+  return voteCard() + viewPfCard() + charterHTML() + `<section class="card"><h2>Commissioner log<span class="sub">every league action, for everyone to see</span></h2>${rows ? `<div class="news">${rows}</div>` : '<div class="empty">Nothing yet. Sims, rule changes, votes and roster removals show up here.</div>'}</section>`;
 }
 // keep "last seen" so inactive GMs can be removed without a vote
 let seenStamp = 0;
@@ -4563,6 +4566,56 @@ async function runMulti(n) {
       <p style="margin:12px 0 0">${newRet} player${newRet === 1 ? '' : 's'} retired${newHof.length ? `, and ${newHof.length} went into the Hall of Fame: ${newHof.map(e => esc(e.name)).join(', ')}` : ''}.</p>
       <div class="row wrap" style="margin-top:12px"><button class="btn primary" type="button" data-act="history" data-v="hof">See the Hall of Fame</button><button class="btn" type="button" data-act="close">Close</button></div></div>`);
   }
+}
+
+// ---------------- Playoff format: pick how October works ----------------
+const PFMT = {
+  '1997': { title: 'Classic 1997', short: '8 teams · 3 rounds', teams: 8,
+    who: 'The three division winners in each league, plus one wild card: the best record among everyone else.',
+    rounds: ['Division Series, best of 5', 'League Championship Series, best of 7', 'World Series, best of 7'],
+    seeding: 'The top division winner plays the wild card, unless they come from the same division. Then it swaps. No byes.',
+    feel: 'Win your division or have the best record left over. One spot is very hard to get.' },
+  '2012': { title: 'One-game wild card (2012–2019)', short: '10 teams · sudden death', teams: 10,
+    who: 'The three division winners in each league, plus two wild cards.',
+    rounds: ['Wild Card Game, one game, winner take all', 'Division Series, best of 5', 'League Championship Series, best of 7', 'World Series, best of 7'],
+    seeding: 'The two wild cards meet in one game at the better team\'s park. The winner faces the league\'s best division winner. The other two division winners play each other.',
+    feel: 'Winning your division matters a lot. A wild card season can end in one night.' },
+  '2022': { title: 'Today\'s format (2022–now)', short: '12 teams · byes for the top 2', teams: 12,
+    who: 'The three division winners in each league, plus three wild cards.',
+    rounds: ['Wild Card Series, best of 3, all at the higher seed', 'Division Series, best of 5', 'League Championship Series, best of 7', 'World Series, best of 7'],
+    seeding: 'Seeds 1 and 2 are the two best division winners and skip the first round. Seed 3 (the third division winner) hosts seed 6, and seed 4 hosts seed 5.',
+    feel: 'More teams get in, so the race stays alive longer. A top-2 seed earns a week of rest.' },
+};
+const eraFmt = era => (era === '1997' ? '1997' : '2022');
+function postFmt() { return (meta && PFMT[meta.post]) ? meta.post : FO.ERA.post; }
+let pfPick = null;
+function pfInfo(k) {
+  const f = PFMT[k];
+  return `<div class="pfinfo"><b>${esc(f.title)}</b><div><span class="muted">Who gets in:</span> ${esc(f.who)}</div><div><span class="muted">Rounds:</span></div><ol>${f.rounds.map(r => `<li>${esc(r)}</li>`).join('')}</ol><div><span class="muted">Seeding:</span> ${esc(f.seeding)}</div><div class="pffeel">${esc(f.feel)}</div></div>`;
+}
+// cards; act = 'pfpick' on the start screen, 'pfset' for the commissioner later
+function pfChooser(cur, act, dis, dark) {
+  return `<div class="pfgrid${dark ? ' dark' : ''}" role="radiogroup" aria-label="Playoff format">${Object.entries(PFMT).map(([k, f]) => `<button type="button" class="pfopt${cur === k ? ' on' : ''}" role="radio" aria-checked="${cur === k}" data-act="${act}" data-v="${k}" ${dis ? 'disabled' : ''}><b>${esc(f.title)}</b><span>${esc(f.short)}</span></button>`).join('')}</div>`;
+}
+function startFmtBlock() {
+  const k = pfPick;
+  return `<div class="pfwrap"><div class="small" style="color:var(--board-dim);margin-bottom:6px">Playoff format</div>${pfChooser(k, 'pfpick', false, true)}
+    ${k ? pfInfo(k) : `<div class="pfinfo"><span class="muted">Tap a format to see how it works. If you skip this, the playoffs match the rosters you pick: 1997 rules for 1997, today's rules for 2026.</span></div>`}</div>`;
+}
+function pfCanChange() { return isCommish() && S && (S.phase === 'offseason' || S.phase === 'done' || (S.phase === 'season' && S.day === 0)); }
+function viewPfCard() {
+  if (!meta || !S) return '';
+  const cur = postFmt(), can = pfCanChange();
+  return `<section class="card"><h2>Playoff format<span class="sub">${esc(PFMT[cur].short)}</span></h2><div class="pad">
+    ${isCommish() ? pfChooser(cur, 'pfset', !can) : ''}${pfInfo(cur)}
+    <p class="small muted" style="margin:8px 0 0">${isCommish() ? (can ? 'You can change this until Opening Day. Everyone in the league sees the change in the log.' : 'Locked until the offseason, so nobody changes the rules mid-race.') : 'The commissioner can change this in the offseason or before Opening Day.'}</p></div></section>`;
+}
+async function setPostFmt(k) {
+  if (!PFMT[k] || !pfCanChange() || k === postFmt()) return;
+  meta = Object.assign({}, meta, { post: k }); raceProjCache = null;
+  if (mode === 'local') saveLocal(); else await writeDoc('league/meta', meta);
+  if (multiGM()) logC(`Changed the playoff format to ${PFMT[k].title}`);
+  render(); toast(`Playoffs: ${PFMT[k].title}.`);
 }
 
 // ---------------- In the red: recovery plan ----------------

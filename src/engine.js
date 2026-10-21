@@ -1028,7 +1028,9 @@
     return days;
   }
   function startPost(W, S) {
-    if (ERA.post === '2022') return startPost2022(W, S);
+    const fmt = S.pfmt || ERA.post;
+    if (fmt === '2022') return startPost2022(W, S);
+    if (fmt === '2012') return startPost2012(W, S);
     const st = standings(S);
     const seeds = {};
     for (const lg of ['AL', 'NL']) {
@@ -1052,6 +1054,22 @@
     };
     news(S, `Regular season complete. Postseason field: ${['AL', 'NL'].map(lg => seeds[lg].ds.flat().join(', ')).join(' / ')}`, 'season');
   }
+  // 2012-2019: three division winners plus two wild cards per league; the wild cards play one game
+  function startPost2012(W, S) {
+    const st = standings(S), seeds = {};
+    const rowOf = id => ({ id, w: S.std[id][0], l: S.std[id][1], rd: S.std[id][2] - S.std[id][3] });
+    const byRec = (a, b) => pctOf(b.w, b.l) - pctOf(a.w, a.l) || b.rd - a.rd;
+    for (const lg of ['AL', 'NL']) {
+      const winners = ['East', 'Central', 'West'].map(d => rowOf(st[lg + ' ' + d][0].id)).sort(byRec);
+      const wset = new Set(winners.map(r => r.id));
+      const wc = TEAMS.filter(t => t.lg === lg && !wset.has(t.id)).map(t => rowOf(t.id)).sort(byRec).slice(0, 2);
+      seeds[lg] = winners.concat(wc).map(r => r.id);
+    }
+    S.phase = 'post';
+    const mk = ([a, b]) => ({ hi: a, lo: b, w: [0, 0], games: [] });
+    S.post = { fmt: '2012', seeds, rounds: [{ name: 'Wild Card Game', best: 1, series: [[seeds.AL[3], seeds.AL[4]], [seeds.NL[3], seeds.NL[4]]].map(mk) }], cur: 0, champ: null };
+    news(S, `Regular season complete. Wild Card Games: ${seeds.AL[3]} host ${seeds.AL[4]}, ${seeds.NL[3]} host ${seeds.NL[4]}. Winners face ${seeds.AL[0]} and ${seeds.NL[0]}.`, 'season');
+  }
   function startPost2022(W, S) {
     const st = standings(S), seeds = {};
     const rowOf = id => ({ id, w: S.std[id][0], l: S.std[id][1], rd: S.std[id][2] - S.std[id][3] });
@@ -1069,7 +1087,7 @@
   }
   function seriesDone(se, best) { const need = Math.ceil(best / 2); return se.w[0] >= need || se.w[1] >= need; }
   function homeFor(n, best) { // returns true if hi seed hosts game n (0-based)
-    const pat = best === 3 ? [1, 1, 1] : best === 5 ? [1, 1, 0, 0, 1] : [1, 1, 0, 0, 0, 1, 1];
+    const pat = best === 1 ? [1] : best === 3 ? [1, 1, 1] : best === 5 ? [1, 1, 0, 0, 1] : [1, 1, 0, 0, 0, 1, 1];
     return !!pat[n];
   }
   function simPostGame(W, S, docs) {
@@ -1108,7 +1126,11 @@
   function advancePost(W, S) {
     const p = S.post, rd = p.rounds[p.cur];
     const better = (a, b) => { const A = S.std[a], B = S.std[b]; return pctOf(A[0], A[1]) >= pctOf(B[0], B[1]) ? [a, b] : [b, a]; };
-    if (p.fmt === '2022' && rd.name === 'Wild Card Series') {
+    if (p.fmt === '2012' && rd.name === 'Wild Card Game') {
+      const w = rd.series.map(winnerOf), sd = p.seeds;
+      p.rounds.push({ name: 'Division Series', best: 5, series: [[sd.AL[0], w[0]], [sd.AL[1], sd.AL[2]], [sd.NL[0], w[1]], [sd.NL[1], sd.NL[2]]].map(([a, b]) => ({ hi: a, lo: b, w: [0, 0], games: [] })) });
+      p.cur++;
+    } else if (p.fmt === '2022' && rd.name === 'Wild Card Series') {
       const w = rd.series.map(winnerOf), sd = p.seeds;
       p.rounds.push({ name: 'Division Series', best: 5, series: [[sd.AL[0], w[1]], [sd.AL[1], w[0]], [sd.NL[0], w[3]], [sd.NL[1], w[2]]].map(([a, b]) => ({ hi: a, lo: b, w: [0, 0], games: [] })) });
       p.cur++;

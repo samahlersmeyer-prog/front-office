@@ -1,0 +1,19 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Your own data (solo league, career history): only you
+    match /data/users/{uid}/{rest=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+    // Your name and picture, so friends see who they're playing
+    match /profiles/{uid} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == uid;
+    }
+    // League data: any signed-in player
+    match /{col}/{rest=**} {
+      allow read, write: if request.auth != null
+        && col in ['league', 'teams', 'trades', 'bids', 'board', 'fa', 'clog', 'leagues'];
+    }
+  }
+}

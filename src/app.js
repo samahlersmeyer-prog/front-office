@@ -781,22 +781,24 @@ function priorLine(id) {
   if (p.t === 'H') return p.AB ? `${fmt3(p.AVG)} · ${p.HR} HR · ${p.SB} SB in ${p.AB} AB` : null;
   return p.outs ? `${p.W}-${p.L} · ${p.ERA.toFixed(2)} ERA · ${ipStr(p.outs)} IP${p.SV ? ' · ' + p.SV + ' SV' : ''}` : null;
 }
-function cmpCard(id, tid) {
+function cmpCard(id, tid, editSide) {
   const p = P[id], farmGuy = farmOrg(id) === tid;
   const cur = seasonLine(id), prior = priorLine(id);
   const con = farmGuy ? 'Minor-league deal, no payroll' : `${money(salFor(id, tid))} a year · through ${yearOf(endFor(id, tid))}`;
   const owed = owedOf(id, tid);
   return `<div class="pc"><div class="pn"><span class="${ovrClass(sOvr(id))}">${sOvr(id)}</span><span class="nm"><button class="lnk" type="button" data-act="player" data-p="${id}"><b>${esc(p.name)}</b></button>${ilTag(id)}<span class="s">${posShort(p)} · age ${p.age}${p.pros ? ' · ' + potTag(id) : ''}${farmGuy ? ` · ${esc(etaText(id))}` : ''}</span></span></div>
+    ${editSide ? `<div class="pcact"><button class="btn sm" type="button" data-act="dswap" data-p="${id}" data-side="${editSide}">⇄ Swap</button><button class="btn sm ghost" type="button" data-act="dremove" data-p="${id}" data-side="${editSide}" aria-label="Remove ${esc(p.name)} from the deal">✕ Remove</button></div>` : ''}
     <dl><dt>This league</dt><dd>${cur ? esc(cur) : farmGuy ? 'In the minors' : 'No stats yet'}</dd>${prior ? `<dt>Real ${FO.ERA.year}</dt><dd>${esc(prior)}</dd>` : ''}<dt>Contract</dt><dd>${con}</dd>${owed ? `<dt>Still owed</dt><dd>${money(owed)}</dd>` : ''}</dl></div>`;
 }
 // Two columns: what you send and what you get, with contract and value totals.
 // send/get are ids; sendTid/getTid own them now; cashOut > 0 means you pay cash.
-function dealCompare(send, get, sendTid, getTid, cashOut) {
+function dealCompare(send, get, sendTid, getTid, cashOut, edit) {
   const side = (ids, tid, cashHere, label, cls) => {
+    const sd = cls === 'out' ? 'give' : 'get';
     const sal = ids.reduce((a, id) => a + (rosterOf(tid).includes(id) ? salFor(id, tid) : 0), 0);
     const owed = ids.reduce((a, id) => a + owedOf(id, tid), 0);
     const val = myValue(ids, tid !== myTeam()) + cashHere / 1e6 / SC() * FO.CASH_UNIT;
-    return `<div class="cside"><div class="clab ${cls}">${label}<span>${esc(TEAM[tid].city)}</span></div>${ids.map(id => cmpCard(id, tid)).join('') || '<div class="pc muted small">No players</div>'}${cashHere ? `<div class="pc"><b>${money(cashHere)} cash</b></div>` : ''}
+    return `<div class="cside"><div class="clab ${cls}">${label}<span>${esc(TEAM[tid].city)}</span></div>${ids.map(id => cmpCard(id, tid, edit ? sd : null)).join('') || '<div class="pc muted small">No players</div>'}${cashHere ? `<div class="pc"><b>${money(cashHere)} cash</b></div>` : ''}
       <dl class="ctot"><dt>Salary this year</dt><dd>${money(sal)}</dd><dt>Total still owed</dt><dd>${money(owed)}</dd><dt>Trade value</dt><dd>${Math.round(val)}</dd></dl></div>`;
   };
   const salSend = send.reduce((a, id) => a + (rosterOf(sendTid).includes(id) ? salFor(id, sendTid) : 0), 0);
@@ -898,12 +900,12 @@ function viewTrade() {
   const canSend = (give.length + get.length > 0) && !warn;
   const hint = !po && showHint ? `<div class="hintbox"><b>What ${esc(TEAM[tradePartner].city)} values</b><ul>${FO.aiHint(W, ctxFor(tradePartner)).map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '';
   const fb = lastFeedback && lastFeedback.to === tradePartner ? `<div class="feedback ${lastFeedback.accept ? 'okb' : 'nob'}"><b>${esc(TEAM[lastFeedback.to].city)}'s GM:</b> ${lastFeedback.reasons.map(r => '“' + esc(r) + '”').join(' ')}</div>` : '';
-  const cashCtl = `<div class="cashrow"><span class="small" style="flex:1;min-width:120px">Cash in the deal</span><button class="btn icon" type="button" data-act="cashstep" data-d="-1" aria-label="More cash to you">−</button><b class="num" style="min-width:150px;text-align:center">${tradeCash === 0 ? 'None' : tradeCash > 0 ? 'You send ' + money(tradeCash) : 'You get ' + money(-tradeCash)}</b><button class="btn icon" type="button" data-act="cashstep" data-d="1" aria-label="More cash from you">+</button></div>`;
-  const deal = give.length + get.length || tradeCash ? dealCompare(give, get, mt, tradePartner, tradeCash) + `<div class="pad" style="padding-top:10px">${adviceBox(tradeAdvice(give, get, tradePartner, tradeCash), 'Your scouts on this deal')}</div>` : `<div class="pad small muted" style="padding-top:12px">Tap players in the two rosters below. The deal lines up here side by side, with this season's stats, contracts and what's still owed.</div>`;
+  const cashCtl = `<div class="cashrow"><span class="small" style="flex:1">Cash in the deal</span><span class="cashctl"><button class="btn icon" type="button" data-act="cashstep" data-d="-1" aria-label="More cash to you">−</button><b class="num" style="min-width:128px;text-align:center">${tradeCash === 0 ? 'None' : tradeCash > 0 ? 'You send ' + money(tradeCash) : 'You get ' + money(-tradeCash)}</b><button class="btn icon" type="button" data-act="cashstep" data-d="1" aria-label="More cash from you">+</button></span></div>`;
+  const deal = give.length + get.length || tradeCash ? dealCompare(give, get, mt, tradePartner, tradeCash, true) + `<div class="pad" style="padding-top:10px">${adviceBox(tradeAdvice(give, get, tradePartner, tradeCash), 'Your scouts on this deal')}</div>` : `<div class="pad small muted" style="padding-top:12px">Tap players in the two rosters below. The deal lines up here side by side, with this season's stats, contracts and what's still owed.</div>`;
   return `<section class="card"><h2>Trade talks</h2><div class="pad"><label class="small muted" for="partner">Trade with</label><select id="partner" style="width:100%;margin-top:4px">${TEAMS.filter(t => t.id !== mt).map(t => `<option value="${t.id}" ${t.id === tradePartner ? 'selected' : ''}>${t.city} (${t.id}) · ${rec(t.id)} · ${ownerOf(t.id) ? 'GM: ' + esc(ownerName(ownerOf(t.id))) : 'computer'}</option>`).join('')}</select></div>
     ${deal}${get.length && !give.length ? dealBuilderCard(mt, tradePartner, get) : get.length ? `<div class="pad" style="padding-top:8px">${builderOpen === bKey(tradePartner, get) ? dealBuilderCard(mt, tradePartner, get) : `<button class="btn sm" type="button" data-act="buildopen">Find other packages</button>`}</div>` : ''}
     <div class="meter">${cashCtl}
-    ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}${fb}${hint}
+    ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}${!warn ? cashSway(mt, tradePartner, give, get) : ''}${fb}${hint}
     <div class="row wrap"><button class="btn primary" type="button" data-act="propose" ${canSend ? '' : 'disabled'}>${po ? 'Send offer to ' + esc(ownerName(po)) : 'Propose trade'}</button>${!po ? `<button class="btn" type="button" data-act="hint">${showHint ? 'Hide hint' : 'Hint'}</button>` : ''}${give.length + get.length + (tradeCash ? 1 : 0) ? '<button class="btn ghost" type="button" data-act="clearpick">Clear</button>' : ''}</div></div></section>
     <div class="split two"><section class="card"><h2>${esc(mt)}<span class="sub">yours · ${give.length} picked</span></h2>${list(mine, myFarm, tradeGive, 'give')}</section>
     <section class="card"><h2>${esc(tradePartner)}<span class="sub">${get.length} picked</span></h2>${list(theirs, theirFarm, tradeGet, 'get')}</section></div>` + viewOffers(mt);
@@ -1166,6 +1168,11 @@ document.addEventListener('click', e => {
     case 'pstab': psTab = el.dataset.v; render(); break;
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
+    case 'gsearch': openSearch(); break;
+    case 'dremove': { (el.dataset.side === 'give' ? tradeGive : tradeGet).delete(pid); builderOpen = ''; lastFeedback = null; closeModal(); render(); break; }
+    case 'dswap': openSwap(pid, el.dataset.side); break;
+    case 'swapdo': swapDo(pid, +el.dataset.n, el.dataset.side); break;
+    case 'cashset': tradeCash = +el.dataset.v; lastFeedback = null; render(); break;
     case 'buildopen': { builderOpen = bKey(tradePartner, [...tradeGet]); el.disabled = true; el.textContent = 'Your scouts are working the phones…'; setTimeout(() => render(), 30); break; }
     case 'buildclose': builderOpen = ''; render(); break;
     case 'builduse': useDeal(i); break;
@@ -1294,6 +1301,7 @@ document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal()
 document.addEventListener('input', e => {
   const el = e.target;
   if (el.id === 'bnote') { boardNote = el.value; return; }
+  if (el.id === 'gQ') { gQ = el.value; const r = $('#gRes'); if (r) r.innerHTML = gsearchResults(); return; }
   if (el.id === 'findQ') { findQ = el.value; const r = $('#findRes'); if (r) r.innerHTML = findResultsHTML(); return; }
   const mt = myTeam(); if (!mt || !S) return;
   if (el.dataset && el.dataset.biz) bizInput(el, false);
@@ -4185,6 +4193,76 @@ function useDeal(i) {
   const o = builder && builder.opts[i]; if (!o) return;
   tradeGive = new Set(o.give); tradeCash = o.cash || 0; builderOpen = ''; lastFeedback = null;
   render(); toast('Deal loaded. Review it, then propose.');
+}
+
+// ---------------- Search any player from the header ----------------
+let gQ = '';
+function gsearchResults() {
+  const mt = myTeam(), q = gQ.trim().toLowerCase();
+  if (q.length < 2) return '<div class="empty">Type at least two letters of a name.</div>';
+  const fa = new Set(freeAgents());
+  const ids = P.filter(p => p && p.name && !p.dup && p.name.toLowerCase().includes(q)).map(p => p.id).filter(id => { const o = orgOf(id); return o !== 'FA' || fa.has(id); })
+    .sort((a, b) => sOvr(b) - sOvr(a)).slice(0, 30);
+  if (!ids.length) return `<div class="empty">No player named “${esc(gQ)}”.</div>`;
+  return ids.map(id => {
+    const p = P[id], org = orgOf(id), isFa = org === 'FA', fg = !!farmOrg(id), mine = org === mt;
+    const where = mine ? 'Your club' + (fg ? ' · farm' : '') : isFa ? `Free agent · asks ${money(askNow(id, mt))}` : `${esc(TEAM[org].city)}${fg ? ' farm · ' + potGrade(id) + ' potential' : ' · ' + money(salFor(id, org)) + '/yr'}`;
+    const btn = !mt || mine ? (mine ? '<span class="tag mine">Yours</span>' : '') : isFa ? `<button class="btn sm primary" type="button" data-act="fa" data-p="${id}">Sign</button>` : marketOpen() ? `<button class="btn sm" type="button" data-act="tradefor" data-p="${id}">Trade for</button>` : '';
+    return `<div class="item"><span class="${ovrClass(sOvr(id))}">${sOvr(id)}</span><div class="nm"><button class="lnk" type="button" data-act="player" data-p="${id}"><b>${esc(p.name)}</b></button> <span class="muted small">${posShort(p)} · ${p.age}</span>${ilTag(id)}<span class="s">${where}</span></div>${btn}</div>`;
+  }).join('');
+}
+function openSearch() {
+  if (!S || !W) return;
+  openModal('Find a player', `<div class="pad" style="padding-top:12px"><input type="search" id="gQ" placeholder="Search any player by name" value="${esc(gQ)}" autocomplete="off" aria-label="Search players by name" style="width:100%"></div><div class="list" id="gRes">${gsearchResults()}</div>`);
+  setTimeout(() => { const i = $('#gQ'); if (i) { i.focus(); i.select(); } }, 50);
+}
+// ---------------- Flexible deals: remove or swap anyone ----------------
+function dealSides() { return { give: [...tradeGive], get: [...tradeGet] }; }
+function acceptsNow(give, get, cash) {
+  const mt = myTeam(), tid = tradePartner;
+  const legal = FO.evalTrade(W, rosterOf(mt), rosterOf(tid), mlbOf(give, mt), mlbOf(get, tid));
+  if (legal.errFrom || legal.errTo) return null;
+  if (cash > 0 && cash > cashOf(mt)) return null;
+  if (cash < 0 && ctxFor(tid).cash < -cash) return null;
+  return FO.aiEvaluate(W, ctxFor(tid), give.map(pinfo), get.map(pinfo), cash).accept;
+}
+function openSwap(pid, side) {
+  const mt = myTeam(), tid = side === 'give' ? mt : tradePartner, d = dealSides(), inDeal = new Set(d.give.concat(d.get));
+  const pool = rosterOf(tid).concat(farmOf(tid).filter(id => !minorsOf(tid).includes(id))).filter(id => !inDeal.has(id) && !injDays(id));
+  const v0 = myValue([pid], side === 'get');
+  const alts = pool.sort((a, b) => (P[b].t === P[pid].t) - (P[a].t === P[pid].t) || Math.abs(myValue([a], side === 'get') - v0) - Math.abs(myValue([b], side === 'get') - v0)).slice(0, 14);
+  const human = !!ownerOf(tradePartner);
+  const rows = alts.map(id => {
+    const give = side === 'give' ? d.give.map(x => x === pid ? id : x) : d.give, get = side === 'get' ? d.get.map(x => x === pid ? id : x) : d.get;
+    const ok = human ? null : acceptsNow(give, get, tradeCash), imp = dealImpact(mt, give, get);
+    const verdict = human ? '' : ok ? '<span class="tag mine">They say yes</span>' : ok === false ? '<span class="tag">Not enough</span>' : '<span class="tag red">Roster rules</span>';
+    return `<div class="item"><span class="${ovrClass(sOvr(id))}">${sOvr(id)}</span><div class="nm"><b>${esc(P[id].name)}</b> <span class="muted small">${posShort(P[id])} · ${P[id].age}</span> ${verdict}<span class="s">${farmOrg(id) ? potGrade(id) + ' potential · prospect' : money(salFor(id, tid)) + '/yr'} · your season ${imp.total >= 0 ? '+' : '−'}${Math.abs(imp.total).toFixed(1)} wins</span></div><button class="btn sm primary" type="button" data-act="swapdo" data-p="${pid}" data-n="${id}" data-side="${side}">Swap in</button></div>`;
+  }).join('');
+  openModal(`Swap out ${P[pid].name}`, `<div class="pad small" style="padding-top:12px">${side === 'give' ? 'Send one of these instead.' : `Ask ${esc(TEAM[tid].city)} for one of these instead.`} Closest in value first${human ? '' : ', with what their GM would say'}.</div><div class="list">${rows || '<div class="empty">Nobody else to swap in.</div>'}</div>
+    <div class="pad row" style="padding-top:10px"><button class="btn ghost" type="button" data-act="dremove" data-p="${pid}" data-side="${side}">Just remove ${esc(lastName(pid))}</button></div>`);
+}
+function swapDo(pid, nid, side) {
+  const set = side === 'give' ? tradeGive : tradeGet;
+  set.delete(pid); set.add(nid); builderOpen = ''; lastFeedback = null; closeModal(); render();
+  toast(`${P[nid].name} is in the deal.`);
+}
+// ---------------- Cash: what would money do? ----------------
+function cashSway(mt, tid, give, get) {
+  if (ownerOf(tid) || !give.length && !get.length) return '';
+  const step = 500000 * SC(), now = acceptsNow(give, get, tradeCash);
+  if (now === null) return '';
+  if (!now) {
+    const cap = Math.min(cashOf(mt), 40 * step * 2);
+    for (let c = Math.max(step, Math.ceil(Math.max(0, tradeCash) / step) * step + step); c <= cap; c += step) {
+      if (acceptsNow(give, get, c)) return `<div class="sway"><span>💰 Add <b>${money(c)}</b> in cash and ${esc(TEAM[tid].city)} says yes.</span><button class="btn sm primary" type="button" data-act="cashset" data-v="${c}">Add ${money(c)}</button></div>`;
+    }
+    return `<div class="sway no"><span>💰 ${cashOf(mt) > step ? `Even ${money(cap)} in cash won't get this done. Add a better player.` : 'You need cash above zero before money can sweeten a deal.'}</span></div>`;
+  }
+  // they already say yes: how much would they pay you on top?
+  let best = 0;
+  for (let c = -step; c >= -40 * step; c -= step) { if (acceptsNow(give, get, c)) best = c; else break; }
+  if (best < Math.min(0, tradeCash) - 1) return `<div class="sway"><span>💰 They'd say yes and still send you up to <b>${money(-best)}</b>.</span><button class="btn sm" type="button" data-act="cashset" data-v="${best}">Ask for ${money(-best)}</button></div>`;
+  return `<div class="sway ok"><span>✅ ${esc(TEAM[tid].city)} says yes to this as it stands.</span></div>`;
 }
 
 // ---------------- In the red: recovery plan ----------------

@@ -441,7 +441,7 @@ function render() {
   if ((S.phase === 'done' || S.phase === 'offseason') && S.std && !TEAMS.some(t => !S.std[t.id])) setTimeout(() => { ensureBook(); }, 0);
   if (TEAMS.some(t => !S.std[t.id])) { m.innerHTML = `<section class="card"><div class="empty">Loading the new league…</div></section>`; return; } // era switch in flight
   sched();
-  const v = { desk: viewDesk, office: viewOffice, team: viewTeam, league: viewLeagueHub, trade: viewMarket, race: () => viewRace() + viewPastRaces() }[tab] || viewDesk;
+  const v = { desk: viewDesk, office: viewOffice, feedback: viewFeedback, team: viewTeam, league: viewLeagueHub, trade: viewMarket, race: () => viewRace() + viewPastRaces() }[tab] || viewDesk;
   m.innerHTML = (myTeam() ? notesHTML(tab) : '') + v();
   paintSimBar();
   if (!simming && myTeam() && (autoOf(myTeam()).biz || autoOf(myTeam()).farm)) setTimeout(() => { runAutopilot(); }, 50);
@@ -1119,18 +1119,19 @@ function renderTabs() {
     trade: '<path d="M4 8h14l-3-3M20 16H6l3 3"/>',
     news: '<path d="M5 4h11v16H6a1 1 0 0 1-1-1zM16 8h3v11a1 1 0 0 1-2 0M8 8h5M8 12h5M8 16h3"/>',
     race: '<path d="M8 4h8v5a4 4 0 0 1-8 0zM8 6H5v1a3 3 0 0 0 3 3M16 6h3v1a3 3 0 0 1-3 3M12 13v4M8 20h8M9.5 17h5"/>',
+    feedback: '<path d="M4 5h16v11H9l-5 4z"/><path d="M8 9h8M8 12h5"/>',
   };
-  const names = { desk: 'Desk', team: 'Team', trade: 'Moves', league: 'League', race: 'GM Race', office: 'Office' };
+  const names = { desk: 'Desk', team: 'Team', trade: 'Moves', league: 'League', race: 'GM Race', office: 'Office', feedback: 'Feedback' };
   const mt = myTeam();
   let teamBadge = 0; try { if (mt && S && W && isCustom(mt) && S.phase !== 'done') teamBadge = coachCount(mt).n; } catch (x) { /* ignore */ }
   const badge = mt && S ? trades.filter(t => t.to === mt && t.status === 'pending' && !offerStale(t)).length : 0;
-  $('#tabs').innerHTML = `<div class="sidebrand">Front Office <span>'${String(meta && W ? yearOf(1) : 1997).slice(2)}</span></div>` + Object.keys(names).map(k => `<button class="tab" type="button" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ic[k]}</svg>${names[k]}${k === 'trade' && badge ? `<span class="badge">${badge}</span>` : ''}${k === 'team' && (teamBadge || unseenNotes(k)) ? `<span class="badge" title="Updates">${unseenNotes(k) || teamBadge}</span>` : ''}${k !== 'team' && !(k === 'trade' && badge) && unseenNotes(k) ? `<span class="badge">${unseenNotes(k)}</span>` : k === 'office' && fbUnread() ? `<span class="badge" title="New feedback">${fbUnread()}</span>` : ''}</button>`).join('');
+  $('#tabs').innerHTML = `<div class="sidebrand">Front Office <span>'${String(meta && W ? yearOf(1) : 1997).slice(2)}</span></div>` + Object.keys(names).map(k => `<button class="tab" type="button" data-tab="${k}" ${tab === k ? 'aria-current="page"' : ''}><svg viewBox="0 0 24 24" aria-hidden="true">${ic[k]}</svg>${names[k]}${k === 'trade' && badge ? `<span class="badge">${badge}</span>` : ''}${k === 'team' && (teamBadge || unseenNotes(k)) ? `<span class="badge" title="Updates">${unseenNotes(k) || teamBadge}</span>` : ''}${k !== 'team' && !(k === 'trade' && badge) && unseenNotes(k) ? `<span class="badge">${unseenNotes(k)}</span>` : k === 'feedback' && fbUnread() ? `<span class="badge" title="New feedback">${fbUnread()}</span>` : ''}</button>`).join('');
 }
 function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { t.hidden = true; }, 3200); }
 
 document.addEventListener('click', e => {
   const tb = e.target.closest('[data-tab]');
-  if (tb) { if (tb.dataset.tab === 'office' && tab !== 'office') lastTabBeforeOffice = tab; tab = tb.dataset.tab; if (tb.dataset.sub) leagueSub = tb.dataset.sub; renderTabs(); render(); window.scrollTo(0, 0); return; }
+  if (tb) { if ((tb.dataset.tab === 'office' || tb.dataset.tab === 'feedback') && tab !== 'office' && tab !== 'feedback') lastTabBeforeOffice = tab; tab = tb.dataset.tab; if (tb.dataset.sub) leagueSub = tb.dataset.sub; renderTabs(); render(); window.scrollTo(0, 0); return; }
   if (e.target.id === 'meChip' || e.target.closest('#meChip')) { openClaim(); return; }
   if (e.target.id === 'lgChip' || e.target.closest('#lgChip')) { openLeaguePicker(); return; }
   if (e.target.id === 'resetChip' || e.target.closest('#resetChip')) { openReset(); return; }
@@ -4372,7 +4373,7 @@ async function sendFeedback() {
   if (text.length < 3) { toast('Write a few words first.'); return; }
   try {
     const id = 'f' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-    await db.doc('feedback/' + id).set({ by: me.id, name: me.name || 'GM', kind: fbKind, text: text.slice(0, 2000), ts: Date.now(), tab: lastTabBeforeOffice || 'office', league: leagueLabel(), team: myTeam() || '', era: meta && meta.era || '', app: WEB ? 'web' : 'claude' });
+    await db.doc('feedback/' + id).set({ by: me.id, name: me.name || 'GM', kind: fbKind, text: text.slice(0, 2000), ts: Date.now(), tab: lastTabBeforeOffice || 'desk', league: leagueLabel(), team: myTeam() || '', era: meta && meta.era || '', app: WEB ? 'web' : 'claude' });
     fbDraft = ''; fbSent = Date.now(); render();
   } catch (e) { toast('Could not send. Try again in a minute.'); }
 }
@@ -4712,7 +4713,7 @@ function viewOffice() {
   }
   const t = TEAM[mt], s = S.std[mt], f = S.fin[mt], su = setup(mt);
   const [hl, hc, hd] = health(mt), wk = weekly(mt);
-  const oseg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg seg4" role="group" aria-label="Office view"><button type="button" data-act="ov" data-v="overview" aria-pressed="${officeView === 'overview'}">Finances</button><button type="button" data-act="ov" data-v="business" aria-pressed="${officeView === 'business'}">Business</button><button type="button" data-act="ov" data-v="analysis" aria-pressed="${officeView === 'analysis'}">Analysis</button><button type="button" data-act="ov" data-v="feedback" aria-pressed="${officeView === 'feedback'}">Feedback${fbUnread() ? ` <span class="badge">${fbUnread()}</span>` : ''}</button></div></div></section>`;
+  const oseg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg seg4" role="group" aria-label="Office view"><button type="button" data-act="ov" data-v="overview" aria-pressed="${officeView === 'overview'}">Finances</button><button type="button" data-act="ov" data-v="business" aria-pressed="${officeView === 'business'}">Business</button><button type="button" data-act="ov" data-v="analysis" aria-pressed="${officeView === 'analysis'}">Analysis</button><button class="mobonly" type="button" data-act="ov" data-v="feedback" aria-pressed="${officeView === 'feedback'}">Feedback${fbUnread() ? ` <span class="badge">${fbUnread()}</span>` : ''}</button></div></div></section>`;
   if (officeView === 'business') return oseg + viewBusiness();
   if (officeView === 'analysis') return oseg + viewAnalysis();
   if (officeView === 'feedback') return oseg + viewFeedback();

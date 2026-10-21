@@ -653,6 +653,10 @@ nav.tabs{background:color-mix(in srgb,var(--paper) 86%,transparent);backdrop-fil
 .builder{border-top:1px solid var(--line);background:color-mix(in srgb,var(--accent) 5%,var(--paper))}
 .bopt{display:grid;gap:8px;padding:12px 16px;border-top:1px solid var(--line)}
 .searchchip{gap:6px;padding:6px 12px}
+.addpc{display:flex;justify-content:center}.addbtn{width:100%;border-style:dashed;color:var(--accent);font-weight:700}
+details.rosters{margin-top:4px}details.rosters>summary{cursor:pointer;list-style:none;padding:14px 16px;font-weight:700;color:var(--accent);text-align:center}
+details.rosters>summary::-webkit-details-marker{display:none}details.rosters>summary::after{content:' ▾'}details.rosters[open]>summary::after{content:' ▴'}
+.btn.icon{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;touch-action:manipulation}
 .cashctl{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
 .pcact{display:flex;gap:6px;margin:8px 0 2px}
 .sway{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:10px 12px;border-radius:12px;background:color-mix(in srgb,var(--amber) 18%,transparent);font-size:14px}
@@ -4967,14 +4971,14 @@ function dealCompare(send, get, sendTid, getTid, cashOut, edit) {
     const sal = ids.reduce((a, id) => a + (rosterOf(tid).includes(id) ? salFor(id, tid) : 0), 0);
     const owed = ids.reduce((a, id) => a + owedOf(id, tid), 0);
     const val = myValue(ids, tid !== myTeam()) + cashHere / 1e6 / SC() * FO.CASH_UNIT;
-    return `<div class="cside"><div class="clab ${cls}">${label}<span>${esc(TEAM[tid].city)}</span></div>${ids.map(id => cmpCard(id, tid, edit ? sd : null)).join('') || '<div class="pc muted small">No players</div>'}${cashHere ? `<div class="pc"><b>${money(cashHere)} cash</b></div>` : ''}
-      <dl class="ctot"><dt>Salary this year</dt><dd>${money(sal)}</dd><dt>Total still owed</dt><dd>${money(owed)}</dd><dt>Trade value</dt><dd>${Math.round(val)}</dd></dl></div>`;
+    return `<div class="cside"><div class="clab ${cls}">${label}<span>${esc(TEAM[tid].city)}</span></div>${ids.map(id => cmpCard(id, tid, edit ? sd : null)).join('') || (edit ? '' : '<div class="pc muted small">No players</div>')}${edit ? `<div class="pc addpc"><button class="btn sm addbtn" type="button" data-act="addopen" data-side="${sd}">＋ Add ${sd === 'give' ? 'your player' : 'their player'}</button></div>` : ''}${cashHere ? `<div class="pc"><b>${money(cashHere)} cash</b></div>` : ''}
+      ${ids.length || cashHere ? `<dl class="ctot"><dt>Salary this year</dt><dd>${money(sal)}</dd><dt>Total still owed</dt><dd>${money(owed)}</dd><dt>Trade value</dt><dd>${Math.round(val)}</dd></dl>` : ''}</div>`;
   };
   const salSend = send.reduce((a, id) => a + (rosterOf(sendTid).includes(id) ? salFor(id, sendTid) : 0), 0);
   const salGet = get.reduce((a, id) => a + (rosterOf(getTid).includes(id) ? salFor(id, getTid) : 0), 0);
   const d = salGet - salSend;
   const sum = `<div class="csum small"><span>Your payroll ${d > 0 ? 'goes up' : d < 0 ? 'goes down' : 'stays the same'}${d ? ' <b class="num">' + money(Math.abs(d)) + '</b>' : ''}</span><span class="muted">Values for other clubs' players come from your scouts.</span></div>`;
-  return `<div class="cmp">${side(send, sendTid, Math.max(0, cashOut), 'You send', 'out')}${side(get, getTid, Math.max(0, -cashOut), 'You get', 'in')}</div>${sum}`;
+  return `<div class="cmp">${side(send, sendTid, Math.max(0, cashOut), 'You send', 'out')}${side(get, getTid, Math.max(0, -cashOut), 'You get', 'in')}</div>${send.length + get.length ? sum : ''}`;
 }
 // ---------------- trade advice (offers and trade talks) ----------------
 // send: ids leaving my org; get: ids coming in; cashOut > 0 = I pay cash. otherTid: the other club.
@@ -5070,14 +5074,14 @@ function viewTrade() {
   const hint = !po && showHint ? `<div class="hintbox"><b>What ${esc(TEAM[tradePartner].city)} values</b><ul>${FO.aiHint(W, ctxFor(tradePartner)).map(x => `<li>${esc(x)}</li>`).join('')}</ul></div>` : '';
   const fb = lastFeedback && lastFeedback.to === tradePartner ? `<div class="feedback ${lastFeedback.accept ? 'okb' : 'nob'}"><b>${esc(TEAM[lastFeedback.to].city)}'s GM:</b> ${lastFeedback.reasons.map(r => '“' + esc(r) + '”').join(' ')}</div>` : '';
   const cashCtl = `<div class="cashrow"><span class="small" style="flex:1">Cash in the deal</span><span class="cashctl"><button class="btn icon" type="button" data-act="cashstep" data-d="-1" aria-label="More cash to you">−</button><b class="num" style="min-width:128px;text-align:center">${tradeCash === 0 ? 'None' : tradeCash > 0 ? 'You send ' + money(tradeCash) : 'You get ' + money(-tradeCash)}</b><button class="btn icon" type="button" data-act="cashstep" data-d="1" aria-label="More cash from you">+</button></span></div>`;
-  const deal = give.length + get.length || tradeCash ? dealCompare(give, get, mt, tradePartner, tradeCash, true) + `<div class="pad" style="padding-top:10px">${adviceBox(tradeAdvice(give, get, tradePartner, tradeCash), 'Your scouts on this deal')}</div>` : `<div class="pad small muted" style="padding-top:12px">Tap players in the two rosters below. The deal lines up here side by side, with this season's stats, contracts and what's still owed.</div>`;
+  const deal = (give.length + get.length || tradeCash ? '' : `<div class="pad small muted" style="padding-top:12px">Tap <b>＋ Add</b> on either side. Start with who you want, and your scouts will point you to what ${esc(TEAM[tradePartner].city)} would take.</div>`) + dealCompare(give, get, mt, tradePartner, tradeCash, true) + (give.length + get.length ? `<div class="pad" style="padding-top:10px">${adviceBox(tradeAdvice(give, get, tradePartner, tradeCash), 'Your scouts on this deal')}</div>` : '');
   return `<section class="card"><h2>Trade talks</h2><div class="pad"><label class="small muted" for="partner">Trade with</label><select id="partner" style="width:100%;margin-top:4px">${TEAMS.filter(t => t.id !== mt).map(t => `<option value="${t.id}" ${t.id === tradePartner ? 'selected' : ''}>${t.city} (${t.id}) · ${rec(t.id)} · ${ownerOf(t.id) ? 'GM: ' + esc(ownerName(ownerOf(t.id))) : 'computer'}</option>`).join('')}</select></div>
     ${deal}${get.length && !give.length ? dealBuilderCard(mt, tradePartner, get) : get.length ? `<div class="pad" style="padding-top:8px">${builderOpen === bKey(tradePartner, get) ? dealBuilderCard(mt, tradePartner, get) : `<button class="btn sm" type="button" data-act="buildopen">Find other packages</button>`}</div>` : ''}
     <div class="meter">${cashCtl}
     ${warn ? `<div class="warn">${esc(warn)}</div>` : ''}${!warn ? cashSway(mt, tradePartner, give, get) : ''}${fb}${hint}
     <div class="row wrap"><button class="btn primary" type="button" data-act="propose" ${canSend ? '' : 'disabled'}>${po ? 'Send offer to ' + esc(ownerName(po)) : 'Propose trade'}</button>${!po ? `<button class="btn" type="button" data-act="hint">${showHint ? 'Hide hint' : 'Hint'}</button>` : ''}${give.length + get.length + (tradeCash ? 1 : 0) ? '<button class="btn ghost" type="button" data-act="clearpick">Clear</button>' : ''}</div></div></section>
-    <div class="split two"><section class="card"><h2>${esc(mt)}<span class="sub">yours · ${give.length} picked</span></h2>${list(mine, myFarm, tradeGive, 'give')}</section>
-    <section class="card"><h2>${esc(tradePartner)}<span class="sub">${get.length} picked</span></h2>${list(theirs, theirFarm, tradeGet, 'get')}</section></div>` + viewOffers(mt);
+    <details class="rosters"${rostersOpen ? ' open' : ''}><summary>Browse both full rosters</summary><div class="split two"><section class="card"><h2>${esc(mt)}<span class="sub">yours · ${give.length} picked</span></h2>${list(mine, myFarm, tradeGive, 'give')}</section>
+    <section class="card"><h2>${esc(tradePartner)}<span class="sub">${get.length} picked</span></h2>${list(theirs, theirFarm, tradeGet, 'get')}</section></div></details>` + viewOffers(mt);
 }
 function offerCard(t, mt) {
   const incoming = t.to === mt;
@@ -5338,6 +5342,8 @@ document.addEventListener('click', e => {
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
     case 'gsearch': openSearch(); break;
+    case 'addopen': openAddPick(el.dataset.side); break;
+    case 'addpick': addPick(pid, el.dataset.side); break;
     case 'dremove': { (el.dataset.side === 'give' ? tradeGive : tradeGet).delete(pid); builderOpen = ''; lastFeedback = null; closeModal(); render(); break; }
     case 'dswap': openSwap(pid, el.dataset.side); break;
     case 'swapdo': swapDo(pid, +el.dataset.n, el.dataset.side); break;
@@ -8434,6 +8440,81 @@ function cashSway(mt, tid, give, get) {
   return `<div class="sway ok"><span>✅ ${esc(TEAM[tid].city)} says yes to this as it stands.</span></div>`;
 }
 
+// ---------------- Add a player to the deal (with recommendations) ----------------
+function addPickRows(side) {
+  const mt = myTeam(), tid = side === 'give' ? mt : tradePartner, human = !!ownerOf(tradePartner);
+  const give = [...tradeGive], get = [...tradeGet], inDeal = new Set(give.concat(get));
+  const mlb = rosterOf(tid).filter(id => !inDeal.has(id) && !injDays(id));
+  const farm = farmOf(tid).filter(id => !minorsOf(tid).includes(id) && !inDeal.has(id));
+  const base = rosterRating(mt, rosterOf(mt).filter(id => !injDays(id))), k = WINS_PER_PT();
+  const startSpot = (r, id) => { const l = r.lineup.find(x => x[0] === id); return l ? 'Starts at ' + l[1] : r.st.rotation.includes(id) ? 'Joins your rotation' : r.st.closer === id ? 'Your new closer' : ''; };
+  const rate = id => {
+    const g2 = side === 'give' ? give.concat(id) : give, t2 = side === 'get' ? get.concat(id) : get;
+    const after = rosterOf(mt).filter(x => !g2.includes(x) && !injDays(x)).concat(t2.filter(x => !farmOrg(x) && !injDays(x)));
+    const r = rosterRating(mt, after), w = (r.bat + r.pit - base.bat - base.pit) * k;
+    return { id, w, ok: human ? null : acceptsNow(g2, t2, tradeCash), fit: side === 'get' && !farmOrg(id) ? startSpot(r, id) : '', v: myValue([id], side === 'get') };
+  };
+  const rows = mlb.map(rate), kids = farm.map(id => ({ id, w: 0, ok: human ? null : acceptsNow(side === 'give' ? give.concat(id) : give, side === 'get' ? get.concat(id) : get, tradeCash), v: myValue([id], side === 'get'), kid: true }));
+  let picks;
+  if (side === 'get') { // who helps you most this season, then the best prospects
+    rows.sort((a, b) => b.w - a.w);
+    picks = rows.filter(r => r.w > 0.3).slice(0, 4);
+  } else { // what gets the deal done and hurts you least
+    rows.sort((a, b) => (b.ok === true) - (a.ok === true) || b.w - a.w || b.v - a.v);
+    kids.sort((a, b) => (b.ok === true) - (a.ok === true) || a.v - b.v);
+    picks = rows.concat(kids).filter(r => r.ok === true).sort((a, b) => b.w - a.w || a.v - b.v).slice(0, 4);
+    if (!picks.length) picks = rows.filter(r => r.w > -0.4).sort((a, b) => b.v - a.v).slice(0, 4);
+  }
+  kids.sort((a, b) => potSeen(b.id) - potSeen(a.id));
+  const pickSet = new Set(picks.map(r => r.id));
+  const fmtW = v => (v >= 0 ? '+' : '−') + Math.abs(v).toFixed(1);
+  const why = r => {
+    const out = [];
+    if (r.ok === true) out.push(`<span class="tag mine">${side === 'give' ? 'Gets it done' : 'They still say yes'}</span>`);
+    else if (r.ok === null && !human) out.push('<span class="tag red">Roster rules</span>');
+    if (r.fit) out.push(`<span class="tag">${esc(r.fit)}</span>`);
+    return out.join(' ');
+  };
+  const row = r => {
+    const p = P[r.id], sub = r.kid ? `${potGrade(r.id)} potential · ${esc(etaText(r.id))}` : `${money(salFor(r.id, tid))}/yr · ${give.length + get.length ? 'whole deal' : 'your season'} <b>${fmtW(r.w)}</b> wins`;
+    return `<div class="item"><span class="${ovrClass(sOvr(r.id))}">${sOvr(r.id)}</span><div class="nm"><b>${esc(p.name)}</b> <span class="muted small">${posShort(p)} · ${p.age}</span> ${why(r)}<span class="s">${sub}</span></div><button class="btn sm${pickSet.has(r.id) ? ' primary' : ''}" type="button" data-act="addpick" data-p="${r.id}" data-side="${side}">Add</button></div>`;
+  };
+  const rest = rows.filter(r => !pickSet.has(r.id)).sort((a, b) => sOvr(b.id) - sOvr(a.id));
+  const recTitle = side === 'get' ? 'Best fits for your club' : human ? 'Cost you the least' : `What ${esc(TEAM[tradePartner].city)} would take`;
+  const recNote = side === 'get' ? 'Who adds the most wins to your team this season.' : human ? 'Players you can spare without hurting this season.' : (picks.some(r => r.ok) ? 'Each of these makes the deal work on its own, and costs you the fewest wins.' : 'No one player gets this done alone. These are worth the most to them without gutting your team.');
+  return `${picks.length ? `<div class="grp">${recTitle}</div><div class="small muted pad" style="padding-top:0">${recNote}</div>${picks.map(row).join('')}` : ''}
+    <div class="grp">${side === 'give' ? 'Your roster' : esc(TEAM[tid].city) + ' roster'}</div>${rest.map(row).join('') || '<div class="empty">Nobody else.</div>'}
+    ${kids.filter(r => !pickSet.has(r.id)).length ? `<div class="grp">Farm</div>${kids.filter(r => !pickSet.has(r.id)).map(row).join('')}` : ''}`;
+}
+function openAddPick(side) {
+  if (!tradePartner) return;
+  openModal(side === 'give' ? 'Add one of your players' : `Add from ${TEAM[tradePartner].city}`, `<div class="list">${addPickRows(side)}</div>`);
+}
+function addPick(pid, side) {
+  (side === 'give' ? tradeGive : tradeGet).add(pid); builderOpen = ''; lastFeedback = null; closeModal(); render();
+  toast(`${P[pid].name} added to the deal.`);
+}
+// ---------------- Hold +/− to keep stepping ----------------
+const HOLD_ACTS = new Set(['cashstep', 'bidstep', 'negstep', 'price']);
+let holdS = null, holdSuppress = 0;
+document.addEventListener('pointerdown', e => {
+  const b = e.target.closest('[data-act][data-d]'); if (!b || !HOLD_ACTS.has(b.dataset.act) || e.button > 0) return;
+  const sel = `[data-act="${b.dataset.act}"][data-d="${b.dataset.d}"]`, slow = b.dataset.act === 'price' ? 140 : 0;
+  holdS = { n: 0 }; holdSuppress = 0;
+  const tick = () => {
+    const el = document.querySelector(sel); if (!el || !holdS || el.disabled) return;
+    holdS.n++; holdS.firing = true; el.click(); holdS.firing = false;
+    holdS.t = setTimeout(tick, Math.max(45 + slow, 170 - holdS.n * 10));
+  };
+  holdS.t = setTimeout(tick, 400);
+});
+const holdEnd = () => { if (!holdS) return; clearTimeout(holdS.t); if (holdS.n) holdSuppress = Date.now() + 400; holdS = null; };
+['pointerup', 'pointercancel', 'blur'].forEach(ev => window.addEventListener(ev, holdEnd));
+document.addEventListener('click', e => { // the release after a hold shouldn't count as one more tap
+  if (holdS && holdS.firing) return;
+  if (holdSuppress > Date.now() && e.target.closest('[data-act][data-d]')) { holdSuppress = 0; e.stopImmediatePropagation(); e.preventDefault(); }
+}, true);
+
 // ---------------- In the red: recovery plan ----------------
 // Ranks every way to get cash positive (instant cash, ongoing savings) with one-tap Apply buttons,
 // plus "Apply the recovery plan" for the safe combination: revenue tweaks, budget trims, and a loan for what's left.
@@ -8843,7 +8924,8 @@ function viewRatings(tid) {
 }
 
 // ---------------- trade AI glue ----------------
-let tradeCash = 0, showHint = false, lastFeedback = null;
+let tradeCash = 0, showHint = false, lastFeedback = null, rostersOpen = false;
+document.addEventListener('toggle', e => { if (e.target.classList && e.target.classList.contains('rosters')) rostersOpen = e.target.open; }, true);
 function pinfo(id) { const tid = playerTeam(id); if (tid === 'FA' && farmOrg(id)) return { id, sal: 0, yrs: 1 }; return { id, sal: salFor(id, tid), yrs: Math.max(1, endFor(id, tid) - seasonNo() + (S.phase === 'offseason' ? 0 : 1)) }; }
 function ctxFor(tid, st) { const SS = st || S; return FO.teamCtx(W, SS, tid, setup(tid), SS === S ? cashOf(tid) : SS.fin[tid][0] + ((docs[tid] && docs[tid].cashAdj) || 0), SS.phase); }
 function offerStale(t) { return t.ai && S && S.phase === 'season' && t.day != null && S.day - t.day > 10; }

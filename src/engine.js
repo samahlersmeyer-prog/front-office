@@ -446,7 +446,7 @@
     return {
       conc: num(b.conc, 1, 0.6, 2), park: num(b.park, F.park0, 0, F.park0 * 3), promo: num(b.promo, 1, 0, 3) | 0,
       ads: num(b.ads, F.adsDef, 0, F.adsMax), dev: num(b.dev, F.devDef, 0, F.devMax), spon: num(b.spon, 1, 0, 3) | 0,
-      tv: TV[b.tv] ? b.tv : 'safe', builds: (b.builds && typeof b.builds === 'object') ? b.builds : {}, loan: num(b.loan, 0, 0, F.loanMax),
+      med: num(b.med, F.devMax * 0.25, 0, F.devMax), tv: TV[b.tv] ? b.tv : 'safe', builds: (b.builds && typeof b.builds === 'object') ? b.builds : {}, loan: num(b.loan, 0, 0, F.loanMax),
     };
   }
   const buildCost = k => BUILDS[k].cost * ERA.fin.bscale;
@@ -888,15 +888,15 @@
       const ops = (F.ops + t.cap * F.seat) / 162;
       const scout = (su.scout != null ? su.scout : ERA.scoutDef) / 162;
       const spon = b.spon * F.spon * Math.pow(t.mkt, 0.3) / 162;
-      const mkt = b.ads / 162, dev = b.dev / 162;
+      const mkt = b.ads / 162, dev = b.dev / 162, med = (b.med != null ? b.med : F.devMax * 0.25) / 162;
       const upkeep = Object.keys(b.builds).filter(k => b.builds[k] && BUILDS[k]).reduce((a, k) => a + buildCost(k) * 0.03, 0) / 162;
       const interest = b.loan * F.rate / 162;
-      f[0] += media + spon - pay - ops - scout - mkt - dev - upkeep - interest;
+      f[0] += media + spon - pay - ops - scout - mkt - dev - med - upkeep - interest; f[15] = (f[15] || 0) + med;
       f[3] += media; f[4] += pay; f[5] += ops; f[8] = (f[8] || 0) + scout;
       f[10] = (f[10] || 0) + spon; f[11] = (f[11] || 0) + mkt; f[12] = (f[12] || 0) + dev; f[13] = (f[13] || 0) + upkeep + interest;
       const m = home[t.id];
       const rev = media + spon + (m ? m.gate + m.conc + m.park + m.merch : 0);
-      const exp = pay + ops + scout + mkt + dev + upkeep + interest + (m ? m.promo : 0) - tax;
+      const exp = pay + ops + scout + mkt + dev + med + upkeep + interest + (m ? m.promo : 0) - tax;
       if (!S.wk) S.wk = {};
       const w = S.wk[t.id] || (S.wk[t.id] = []);
       w.push([Math.round(rev), Math.round(exp)]); if (w.length > 7) w.shift();
@@ -924,7 +924,7 @@
       games.push(g);
     }
     for (const g of games) recordGame(W, S, g);
-    for (const g of games) injuries(W, S, g, R);
+    for (const g of games) injuries(W, S, g, R, setups);
     dailyFinance(W, S, setups, games, R);
     // notable news
     for (const g of games) noteGame(W, S, g);
@@ -952,16 +952,20 @@
     for (const t of TEAMS) { const d = docs[t.id]; const r = (d && Array.isArray(d.roster) && d.roster.length) ? d.roster : W.defRoster[t.id]; if (r.includes(id)) return t.id; }
     return null;
   }
-  function injuries(W, S, g, R) {
+  // medical staff: 0 = none, 1 = the most money can buy. Default spending (a quarter of the max) is normal risk.
+  function medFrac(su) { const F = ERA.fin, m = su && su.biz && su.biz.med != null ? su.biz.med : F.devMax * 0.25; return Math.max(0, Math.min(1, m / F.devMax)); }
+  function medRisk(f) { return 1.15 - 0.6 * f; }
+  function medDays(f) { return 1.1 - 0.4 * f; }
+  function injuries(W, S, g, R, setups) {
     const P = W.P;
     for (const tid of [g.home, g.away]) {
-      const s = g.sides[tid];
+      const s = g.sides[tid], mf = medFrac(setups && setups[tid]);
       const ids = s.order.filter(o => o.pos !== 'P').map(o => o.id).concat([s.starter]);
       for (const id of ids) {
         if (S.inj[id]) continue;
-        const risk = id === s.starter ? 0.0045 : 0.0026;
+        const risk = (id === s.starter ? 0.0045 : 0.0026) * medRisk(mf);
         if (R() >= risk) continue;
-        const u = R(), days = Math.round(u < 0.55 ? 3 + R() * 12 : u < 0.88 ? 15 + R() * 20 : 35 + R() * 45);
+        const u = R(), days = Math.max(2, Math.round((u < 0.55 ? 3 + R() * 12 : u < 0.88 ? 15 + R() * 20 : 35 + R() * 45) * medDays(mf)));
         S.inj[id] = days;
         news(S, `${P[id].name} (${tid}) went on the injured list, out about ${days} days.`, 'injury', tid);
       }
@@ -1590,5 +1594,134 @@
     return { give: best.ids, get: [target], cash };
   }
 
-  G.FO = { showdown, TEAMS, TEAM, buildWorld, buildSchedule, newState, simDay, simPostGame, standings, teamSetup, autoLineup, luScore, autoStaff, defAt, posProfile, battingOrder, evalTrade, cpuAccepts, tradeValue, rosterOk, canPlay, pctOf, dateOf, attendance, rng, salOf, endOf, faAsk, faYears, BONUS, expireContracts, cpuBids, resolveFreeAgency, setEra, ERAS, ERA, teamCtx, aiValue, aiEvaluate, aiHint, aiOffer, needOf, CASH_UNIT, makeProspect, applyFarm, applyDraftPicks, hash32, newFarm, farmWinter, setDev, prospectScore, projOvr, FARM_MAX, READY_GAP, BUILDS, PROMOS, TV, fanParts, bizOf, buildCost, capOf, fanTarget, tvMult, localTV, gameMoney, starsOf, concPerFan, parkPerFan };
+  // ---------- dynasty: aging, retirement & the Hall of Fame ----------
+  // league/dyn = { lid, era, aged (winters applied), d:{id: rating change}, ret:{id: season retired}, war:{id}, car:{id:[...]}, hof:[...], log:[...] }
+  // Every player keeps his original ratings in p.b0; aging moves his overall by d[id] points and rebuilds his rates to match.
+  function snap0(p, fresh) {
+    if (!p.b0 || fresh) p.b0 = { r: Object.assign({}, p.r), ovr: p.ovr, val: p.val, w: p.w, rt: Object.assign({}, p.rt), h: p.h, eraN: p.eraN, age: p.age, def: p.def, spd: p.spd, defAt: p.defAt ? Object.assign({}, p.defAt) : null };
+    return p.b0;
+  }
+  function restore0(p) { const b = p.b0; p.r = Object.assign({}, b.r); p.ovr = b.ovr; p.val = b.val; p.w = b.w; p.rt = Object.assign({}, b.rt); p.h = b.h; p.eraN = b.eraN; p.def = b.def; p.spd = b.spd; if (b.defAt) p.defAt = Object.assign({}, b.defAt); }
+  function setAge(W, p, delta, years) {
+    const b = snap0(p), lg = W.lg, L = lg.L;
+    if (years != null) p.age = b.age + years;
+    restore0(p);
+    if (!delta) return;
+    const T = Math.max(25, Math.min(99, b.ovr + delta));
+    if (p.t === 'H') {
+      const extra = b.val - ((b.w - lg.lgW) / 1.2 * 600 + (POS_ADJ[p.pos] || 0));
+      const want = (T - 60) / 0.8;
+      const mk = m => { const r = { bb: b.r.bb * m, k: Math.min(0.45, b.r.k / Math.sqrt(m)), s: b.r.s * m, d: b.r.d * m, t: b.r.t * m, hr: b.r.hr * m }; r.o = 1 - (r.bb + r.k + r.s + r.d + r.t + r.hr); return r; };
+      let lo = 0.3, hi = 2.2, r = b.r;
+      for (let i = 0; i < 36; i++) { const m = (lo + hi) / 2; r = mk(m); if (r.o < 0.2 || (woba(r) - lg.lgW) / 1.2 * 600 + (POS_ADJ[p.pos] || 0) + extra > want) hi = m; else lo = m; }
+      p.r = r; p.w = woba(r); p.val = (p.w - lg.lgW) / 1.2 * 600 + (POS_ADJ[p.pos] || 0) + extra;
+      p.ovr = Math.round(Math.max(25, Math.min(99, 60 + 0.8 * p.val)));
+      const bip = 1 - r.bb - r.k, cont = (r.s + r.d + r.t + r.hr) / (r.s + r.d + r.t + r.hr + r.o + r.k);
+      const slow = Math.min(0, delta);
+      p.spd = Math.max(0.75, b.spd * (1 + slow * 0.006));
+      p.def = clampR(b.def + slow * 0.45);
+      p.rt = { con: clampR(50 + (cont - 0.265) * 600), pow: clampR(50 + ((r.d + 2 * r.t + 3 * r.hr) / bip - 0.20) * 260), eye: clampR(50 + (r.bb - L.bb) * 600 - (r.k - L.k) * 150), spd: clampR(50 + (p.spd - 1) * 150), def: p.def };
+      if (b.defAt) { p.defAt = {}; for (const k in b.defAt) p.defAt[k] = clampR(b.defAt[k] + slow * 0.45); }
+    } else {
+      const sp = p.role === 'SP';
+      const eraT = sp ? lg.lgERA - (T - 60) / 0.85 * 9 / 200 : lg.lgERA - (T - 55) / 1.5 * 9 / 75;
+      const k = Math.max(0.05, Math.min(0.4, b.r.k * (1 + delta * 0.006))), bb = Math.max(0.03, Math.min(0.2, b.r.bb * (1 - delta * 0.004)));
+      let lo = 0.4, hi = 2.4, h = 1, r = null;
+      for (let i = 0; i < 36; i++) { h = (lo + hi) / 2; r = pitchRates(lg, k, bb, h); if (pitchERA(lg, r) > eraT) hi = h; else lo = h; }
+      p.h = h; p.r = r; p.eraN = pitchERA(lg, r);
+      if (sp) { const runs = (lg.lgERA - p.eraN) * 200 / 9; p.val = runs; p.ovr = Math.round(Math.max(25, Math.min(99, 60 + 0.85 * runs))); }
+      else { const runs = (lg.lgERA - p.eraN) * 75 / 9; p.val = runs * 1.3; p.ovr = Math.round(Math.max(25, Math.min(97, 55 + 1.5 * runs))); }
+      p.rt = Object.assign({}, b.rt, { stf: clampR(50 + (r.k - L.k) * 330), ctl: clampR(50 - (r.bb - L.bb) * 500), mov: clampR(50 - (h - 1) * 160) });
+    }
+  }
+  const isVet = (W, p) => p && !p.pros && p.id < W.base;
+  // put a league's aging on the world (call after applyFarm)
+  function applyDyn(W, dyn) {
+    const d = (dyn && dyn.d) || {}, yrs = (dyn && dyn.aged) || 0;
+    for (const p of W.P) {
+      if (!p) continue;
+      if (isVet(W, p)) { if (p.b0 || d[p.id] || yrs) setAge(W, p, d[p.id] || 0, yrs); }
+      else if (p.pros && d[p.id]) { snap0(p, true); setAge(W, p, d[p.id], null); }
+    }
+  }
+  // how much a player changes over one winter, by the age he will play next season at
+  function ageStep(age, R) {
+    const base = age <= 22 ? 4 : age <= 24 ? 3 : age <= 26 ? 1.5 : age <= 28 ? 0.5 : age <= 30 ? -0.5 : age <= 32 ? -1.5 : age <= 34 ? -3 : age <= 36 ? -4 : -5;
+    const noise = (R() + R() + R() - 1.5) * 3.2; // about ±2.5, sometimes more
+    return base + noise;
+  }
+  const CAR_H = 8, CAR_P = 8; // hitters: [seasons, G, AB, H, HR, RBI, SB, BB] · pitchers: [seasons, G, W, L, SV, OUTS, SO, R]
+  function seasonValue(p, bat, pit) {
+    const v = Math.max(0, (p.ovr - 55) / 5);
+    if (p.t === 'H') return bat ? v * Math.min(1, bat[1] / 650) : 0;
+    if (!pit) return 0;
+    return p.role === 'SP' ? v * Math.min(1, pit[5] / 650) : v * 0.55 * Math.min(1, pit[5] / 210);
+  }
+  // Rough career value (wins above replacement, rounded) piled up before each era's league begins, for the
+  // stars whose real careers the starting ratings can't see. Everyone else gets an estimate from age and ratings.
+  const LEGENDS = {
+    '1997': { 'Rickey Henderson': 100, 'Barry Bonds': 95, 'Cal Ripken Jr.': 85, 'Wade Boggs': 86, 'Roger Clemens': 80, 'Paul Molitor': 68, 'Ryne Sandberg': 67, 'Eddie Murray': 66, 'Tony Gwynn': 62, 'Tim Raines': 62, 'Dennis Eckersley': 60, 'Greg Maddux': 57, 'Mark McGwire': 46, 'Ken Griffey Jr.': 46, 'Barry Larkin': 50, 'Frank Thomas': 45, 'Orel Hershiser': 50, 'Dennis Martinez': 45, 'Randy Johnson': 40, 'John Smoltz': 42, 'Tom Glavine': 40, 'Fred McGriff': 42, 'Jose Canseco': 38, 'Harold Baines': 34, 'Edgar Martinez': 36, 'Lee Smith': 29, 'Ozzie Smith': 75, 'Craig Biggio': 38, 'Jeff Bagwell': 33, 'Larry Walker': 30, 'Mike Piazza': 24, 'Ivan Rodriguez': 20, 'Roberto Alomar': 40, 'Kevin Brown': 35, 'David Cone': 45, 'Chuck Finley': 38, 'Kenny Lofton': 30, 'Jim Thome': 14, 'Mark Grace': 34, 'Will Clark': 46, 'Gary Sheffield': 30, 'Brett Butler': 49, 'Chili Davis': 35, 'Andre Dawson': 64, 'Dave Winfield': 64, 'Jack McDowell': 25 },
+    '2026': { 'Mike Trout': 87, 'Max Scherzer': 75, 'Mookie Betts': 70, 'Paul Goldschmidt': 62, 'Freddie Freeman': 62, 'Manny Machado': 62, 'Nolan Arenado': 58, 'Jose Altuve': 55, 'Chris Sale': 55, 'Bryce Harper': 52, 'Francisco Lindor': 52, 'Aaron Judge': 54, 'Shohei Ohtani': 48, 'Gerrit Cole': 46, 'Giancarlo Stanton': 46, 'Jacob deGrom': 46, 'Carlos Correa': 46, 'Xander Bogaerts': 40, 'Corey Seager': 38, 'Salvador Perez': 32, 'Craig Kimbrel': 25, 'Kenley Jansen': 27, 'Aaron Nola': 33, 'Juan Soto': 37 },
+  };
+  function preValue(W, p) {
+    if (!isVet(W, p)) return 0;
+    const b = p.b0 || p, leg = (LEGENDS[ERA.id] || {})[p.name];
+    if (leg != null) return leg;
+    const yrs = Math.max(0, b.age - 22.5), per = Math.max(0, (b.ovr - 55) / 5) * (p.t === 'P' && p.role !== 'SP' ? 0.4 : 0.7);
+    return Math.round(Math.min(35, yrs * per) * 10) / 10;
+  }
+  // One winter. Adds the season's stats to careers, ages every active player, retires some free agents and inducts the best.
+  // candidates: ids who may retire this winter (free agents). Returns { dyn, retired:[ids], inducted:[entries] }.
+  function winterDyn(W, dyn0, S, season, seed, candidates, opts) {
+    const dyn = JSON.parse(JSON.stringify(dyn0 || {}));
+    dyn.d = dyn.d || {}; dyn.ret = dyn.ret || {}; dyn.war = dyn.war || {}; dyn.car = dyn.car || {}; dyn.hof = dyn.hof || []; dyn.aged = dyn.aged || 0;
+    const P = W.P, year = ERA.year - 1 + season;
+    // 1. careers from the season just played
+    for (const id in S.bat) { const p = P[id], a = S.bat[id]; if (!p || p.t !== 'H') continue; const c = dyn.car[id] || (dyn.car[id] = new Array(CAR_H).fill(0)); c[0]++; c[1] += a[0]; c[2] += a[2]; c[3] += a[4]; c[4] += a[7]; c[5] += a[8]; c[6] += a[11]; c[7] += a[9]; }
+    for (const id in S.pit) { const p = P[id], a = S.pit[id]; if (!p || p.t !== 'P') continue; const c = dyn.car[id] || (dyn.car[id] = new Array(CAR_P).fill(0)); c[0]++; c[1] += a[0]; c[2] += a[2]; c[3] += a[3]; c[4] += a[4]; c[5] += a[5]; c[6] += a[9]; c[7] += a[7]; }
+    const seen = new Set(Object.keys(S.bat).concat(Object.keys(S.pit)));
+    for (const id of seen) { const p = P[id]; if (!p) continue; dyn.war[id] = Math.round(((dyn.war[id] || 0) + seasonValue(p, S.bat[id], S.pit[id])) * 10) / 10; }
+    // 2. aging (catch up any winters a league played before aging existed)
+    const target = season; // after this winter, ratings belong to season+1, i.e. `season` winters applied
+    while (dyn.aged < target) {
+      const w = dyn.aged + 1, R = rng(hash32(seed >>> 0, 0xA6E + w * 977));
+      for (const p of P) {
+        if (!p || dyn.ret[p.id] != null || p.dup) continue;
+        if (isVet(W, p)) {
+          const ageNext = (p.b0 ? p.b0.age : p.age) + w;
+          const cur = (p.b0 ? p.b0.ovr : p.ovr) + (dyn.d[p.id] || 0);
+          const ch = ageStep(ageNext, R);
+          dyn.d[p.id] = Math.round(Math.max(25, Math.min(99, cur + ch)) - (p.b0 ? p.b0.ovr : p.ovr));
+        } else if (p.pros) {
+          const ageNext = p.age + (target - w) + 1; // prospects: decline only once they are past their prime
+          if (ageNext >= 30) { const ch = ageStep(ageNext, R); if (ch < 0) dyn.d[p.id] = Math.round((dyn.d[p.id] || 0) + ch); }
+        }
+      }
+      dyn.aged = w;
+    }
+    applyDyn(W, dyn);
+    // 3. retirements among free agents (contracts up or unsigned)
+    const R2 = rng(hash32(seed >>> 0, 0x5E7 + season * 131)), retired = [], inducted = [];
+    for (const id of candidates || []) {
+      const p = P[id]; if (!p || dyn.ret[id] != null || p.dup) continue;
+      const a = p.age, o = p.ovr;
+      let pr = a >= 41 ? 0.92 : a >= 39 ? 0.6 : a >= 37 ? (o < 62 ? 0.5 : 0.18) : a >= 35 ? (o < 55 ? 0.4 : o < 62 ? 0.15 : 0.04) : a >= 33 ? (o < 48 ? 0.35 : 0.02) : 0;
+      if (opts && opts.minorOnly && o >= 50) pr *= 0.5;
+      if (R2() < pr) { dyn.ret[id] = season; retired.push(+id); }
+    }
+    // 4. Hall of Fame
+    const hofSet = new Set(dyn.hof.map(h => h.id));
+    for (const id of retired) {
+      const p = P[id], score = Math.round((preValue(W, p) + (dyn.war[id] || 0)) * 10) / 10;
+      if (score >= HOF_BAR && !hofSet.has(id)) {
+        const e = { id, name: p.name, pos: p.t === 'P' ? (p.role === 'SP' ? 'SP' : 'RP') : p.pos, t: p.t, y: year + 1, score, peak: Math.max(p.b0 ? p.b0.ovr : p.ovr, p.ovr), car: dyn.car[id] || null, last: opts && opts.lastTeam ? opts.lastTeam(id) : null };
+        dyn.hof.push(e); inducted.push(e);
+      }
+    }
+    return { dyn, retired, inducted };
+  }
+  const HOF_BAR = 65;
+  function hofScore(W, dyn, id) { const p = W.P[id]; return p ? Math.round((preValue(W, p) + ((dyn && dyn.war && dyn.war[id]) || 0)) * 10) / 10 : 0; }
+
+  G.FO = { medFrac, medRisk, medDays, applyDyn, winterDyn, setAge, hofScore, HOF_BAR, preValue, showdown, TEAMS, TEAM, buildWorld, buildSchedule, newState, simDay, simPostGame, standings, teamSetup, autoLineup, luScore, autoStaff, defAt, posProfile, battingOrder, evalTrade, cpuAccepts, tradeValue, rosterOk, canPlay, pctOf, dateOf, attendance, rng, salOf, endOf, faAsk, faYears, BONUS, expireContracts, cpuBids, resolveFreeAgency, setEra, ERAS, ERA, teamCtx, aiValue, aiEvaluate, aiHint, aiOffer, needOf, CASH_UNIT, makeProspect, applyFarm, applyDraftPicks, hash32, newFarm, farmWinter, setDev, prospectScore, projOvr, FARM_MAX, READY_GAP, BUILDS, PROMOS, TV, fanParts, bizOf, buildCost, capOf, fanTarget, tvMult, localTV, gameMoney, starsOf, concPerFan, parkPerFan };
 })(typeof globalThis !== 'undefined' ? globalThis : window);

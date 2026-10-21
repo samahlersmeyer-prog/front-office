@@ -1,6 +1,7 @@
 (function () {
 'use strict';
 const FO = window.FO;
+{ const af = FO.applyFarm; FO.applyFarm = function (a, b, c) { af(a, b, c); try { applyDynNow(); } catch (e) { /* early */ } }; }
 const TEAM = FO.TEAM, TEAMS = FO.TEAMS;
 let W = null, P = null, curEra = null;
 function initWorld(era) {
@@ -9,6 +10,7 @@ function initWorld(era) {
   W = FO.buildWorld(document.getElementById(era === '2026' ? 'rosters26' : 'rosters').textContent);
   P = W.P; schedSeed = null; if (typeof invalidate === 'function') invalidate();
   if (typeof syncFarm === 'function') syncFarm();
+  try { applyDynNow(); } catch (e) { /* early */ }
 }
 const ERA = () => FO.ERA;
 const SC = () => FO.ERA.scale;
@@ -39,7 +41,7 @@ function setup(tid) { return setupCache[tid] || (setupCache[tid] = FO.teamSetup(
 function playerTeam(id) { if (!pteamCache) { pteamCache = {}; TEAMS.forEach(t => setup(t.id).roster.forEach(p => { pteamCache[p] = t.id; })); } return pteamCache[id] || 'FA'; }
 let faCache = null;
 function invalidate() { setupCache = {}; pteamCache = null; faCache = null; forgCache = null; }
-function freeAgents() { if (!faCache) { playerTeam(0); farmOrg(-1); faCache = P.filter(p => p && !p.dup && !(p.id in pteamCache) && !(p.id in forgCache)).map(p => p.id); } return faCache; }
+function freeAgents() { if (!faCache) { playerTeam(0); farmOrg(-1); faCache = P.filter(p => p && !p.dup && !(p.id in pteamCache) && !(p.id in forgCache) && !isRetired(p.id)).map(p => p.id); } return faCache; }
 function salFor(id, tid) { tid = tid || playerTeam(id); return TEAM[tid] ? FO.salOf(W, setup(tid).con, id) : P[id].sal; }
 function endFor(id, tid) { tid = tid || playerTeam(id); return TEAM[tid] ? FO.endOf(W, setup(tid).con, id) : 0; }
 const LEN = () => (S && S.len) || 162;
@@ -75,8 +77,8 @@ function teamWrite(tid, patch) {
   docs[tid] = next; invalidate(); render();
   return writeDoc('teams/' + tid, next);
 }
-function saveLocal() { try { localStorage.setItem(LS, JSON.stringify({ meta, S, box, docs, trades, bids, hist, farm, board, draft })); } catch (e) { /* storage unavailable */ } }
-function loadLocal() { try { const o = JSON.parse(localStorage.getItem(LS) || 'null'); if (o) { meta = o.meta; S = o.S; box = o.box; docs = o.docs || {}; trades = o.trades || []; bids = o.bids || {}; hist = o.hist || { seasons: [] }; farm = o.farm || null; board = o.board || {}; draft = o.draft || null; } } catch (e) { /* ignore */ } farmLoaded = true; }
+function saveLocal() { try { localStorage.setItem(LS, JSON.stringify({ meta, S, box, docs, trades, bids, hist, farm, board, draft, dyn })); } catch (e) { /* storage unavailable */ } }
+function loadLocal() { try { const o = JSON.parse(localStorage.getItem(LS) || 'null'); if (o) { meta = o.meta; S = o.S; box = o.box; docs = o.docs || {}; trades = o.trades || []; bids = o.bids || {}; hist = o.hist || { seasons: [] }; farm = o.farm || null; board = o.board || {}; draft = o.draft || null; dyn = o.dyn || null; } } catch (e) { /* ignore */ } farmLoaded = true; }
 const clone = o => o == null ? o : JSON.parse(JSON.stringify(o));
 
 // ---------------- boot ----------------
@@ -88,7 +90,7 @@ async function boot() {
     const m = await user.me();
     if (m.id) { me = { id: m.id, name: m.name, avatar: m.avatarUrl, canWrite: (await user.can('data.write')) !== false }; mode = 'shared'; }
   }
-  if (mode !== 'shared') { mode = 'local'; me = { id: 'local', name: 'You', avatar: '', canWrite: true }; loadLocal(); loadCareer(); if (meta) initWorld(meta.era || '1997'); render(); return; }
+  if (mode !== 'shared') { mode = 'local'; me = { id: 'local', name: 'You', avatar: '', canWrite: true }; loadLocal(); loadCareer(); if (meta) initWorld(meta.era || '1997'); try { restoreMultiOwner(); } catch (e) { /* ignore */ } render(); return; }
   db.collection('leagues').onSnapshot(q => { const o = {}; q.docs.forEach(x => { o[x.id] = clone(x.data()); }); leagueList = o; if (league.kind === 'custom' && o[league.id]) league.name = o[league.id].name; render(); }, dbErr);
   watchFeedback();
   subscribeLeague();
@@ -98,10 +100,11 @@ function subscribeLeague() {
   unsubs.forEach(f => { try { f(); } catch (e) { /* ignore */ } }); unsubs = [];
   const on = (ref, fn) => { unsubs.push(ref.onSnapshot(fn, dbErr)); };
   on(dref('league/meta'), s => { meta = s.exists ? clone(s.data()) : null; if (meta) { initWorld(meta.era || '1997'); syncFarm(); } render(); });
+  on(dref('league/dyn'), s => { dyn = s.exists ? clone(s.data()) : null; applyDynNow(); render(); });
   on(dref('league/farm'), s => { farm = s.exists ? clone(s.data()) : null; farmLoaded = true; syncFarm(); render(); });
   on(dref('league/state'), s => { if (!simming) { S = s.exists ? clone(s.data()) : null; render(); } });
   on(dref('league/box'), s => { box = s.exists ? clone(s.data()) : null; render(); });
-  on(cref('teams'), q => { const d = {}; q.docs.forEach(x => { d[x.id] = clone(x.data()); }); docs = d; resolveProfiles(); render(); });
+  on(cref('teams'), q => { const d = {}; q.docs.forEach(x => { d[x.id] = clone(x.data()); }); docs = d; resolveProfiles(); try { restoreMultiOwner(); } catch (e) { /* ignore */ } render(); });
   on(dref('league/history'), s => { hist = s.exists ? clone(s.data()) : { seasons: [] }; if (legacyBook().length) setTimeout(() => { ensureBook(); }, 0); syncCareer(); if (tab === 'league' && leagueSub === 'history') render(); });
   loadCareer();
   on(cref('board'), q => { const b = {}; q.docs.forEach(x => { b[x.id] = clone(x.data()); }); board = b; render(); });
@@ -138,7 +141,7 @@ function switchLeague(lg) {
   try { const r = JSON.parse(localStorage.getItem('fo-recent') || '[]').filter(x => !(x.kind === lg.kind && x.id === lg.id)); r.unshift({ kind: lg.kind, id: lg.id, name: lg.name }); localStorage.setItem('fo-recent', JSON.stringify(r.slice(0, 6))); } catch (e) { /* ignore */ }
   league = lg;
   try { localStorage.setItem('fo-league', JSON.stringify(lg)); } catch (e) { /* ignore */ }
-  meta = null; S = null; box = null; docs = {}; trades = []; bids = {}; hist = { seasons: [] }; farm = null; farmLoaded = false; board = {};
+  meta = null; S = null; box = null; docs = {}; trades = []; bids = {}; hist = { seasons: [] }; farm = null; farmLoaded = false; board = {}; dyn = null;
   anaCache = null; raceProjCache = null; lastRecap = null; tradeGive.clear(); tradeGet.clear(); tradeCash = 0; tradePartner = null; teamView = null; nego = null; bidDraft = null;
   tab = 'desk'; closeModal(); invalidate();
   subscribeLeague(); renderTabs(); render(); window.scrollTo(0, 0);
@@ -1086,8 +1089,8 @@ function openPlayer(id) {
   const fogged = myTeam() && tid !== myTeam() && formerTeam(id) !== myTeam() && fogErr();
   const hrows = historyRows(id);
   const histT = hrows.length ? `<div class="scroll"><table><thead><tr><th>In this league</th>${p.t === 'H' ? '<th>AB</th><th>AVG</th><th>HR</th><th>RBI</th><th>SB</th>' : '<th>IP</th><th>W-L</th><th>ERA</th><th>SO</th><th>SV</th>'}</tr></thead><tbody>${hrows.join('')}</tbody></table></div>` : '';
-  const body = `${injDays(id) ? `<p class="pad warn" style="padding-top:12px;margin:0">On the injured list, out about ${injDays(id)} more days.</p>` : ''}<div class="kv"><div><span>Overall${fogged ? ' (scouted)' : ''}</span><b>${sOvr(id)}${fogged ? `<span class="muted small"> ±${fogErr()}</span>` : ''}</b></div><div><span>Plays</span><b>${posShort(p)}</b></div><div><span>Age · ${p.t === 'H' ? 'Bats' : 'Throws'}</span><b>${p.age} · ${p.t === 'H' ? p.bats : p.throws}</b></div><div><span>${tid === 'FA' ? 'Asking' : 'Salary · through'}</span><b>${tid === 'FA' ? money(FO.faAsk(p)) : money(salFor(id, tid)) + ' · ' + "'" + String(yearOf(endFor(id, tid))).slice(2)}</b></div></div>${p.pros ? `<div class="pad small" style="padding-top:12px">Came up through the farm. Potential ${potTag(id)}${p.gap > 0 ? ', still developing' : ', fully developed'}.</div>` : ''}${gloveLine(p) ? `<p class="pad small" style="padding-top:10px;margin:0"><b>Glove by position:</b> ${gloveLine(p)}${p.util ? ' <span class="tag">Utility</span>' : ''}</p>` : ''}<div class="bars">${bars}</div>${real}${histT}${farmT ? '' : playerActions(id, tid)}${farmActions(id)}`;
-  openModal(p.name, body, `<span class="abbr">${esc(tid === 'FA' ? 'FREE AGENT' : farmT ? tid + ' MINORS' : tid)}</span>`);
+  const body = `${dynPlayerBits(id)}${injDays(id) ? `<p class="pad warn" style="padding-top:12px;margin:0">On the injured list, out about ${injDays(id)} more days.</p>` : ''}<div class="kv"><div><span>Overall${fogged ? ' (scouted)' : ''}</span><b>${sOvr(id)}${fogged ? `<span class="muted small"> ±${fogErr()}</span>` : ''}</b></div><div><span>Plays</span><b>${posShort(p)}</b></div><div><span>Age · ${p.t === 'H' ? 'Bats' : 'Throws'}</span><b>${p.age} · ${p.t === 'H' ? p.bats : p.throws}</b></div><div><span>${tid === 'FA' ? (isRetired(id) ? 'Status' : 'Asking') : 'Salary · through'}</span><b>${tid === 'FA' ? (isRetired(id) ? 'Retired' : money(FO.faAsk(p))) : money(salFor(id, tid)) + ' · ' + "'" + String(yearOf(endFor(id, tid))).slice(2)}</b></div></div>${p.pros ? `<div class="pad small" style="padding-top:12px">Came up through the farm. Potential ${potTag(id)}${p.gap > 0 ? ', still developing' : ', fully developed'}.</div>` : ''}${gloveLine(p) ? `<p class="pad small" style="padding-top:10px;margin:0"><b>Glove by position:</b> ${gloveLine(p)}${p.util ? ' <span class="tag">Utility</span>' : ''}</p>` : ''}<div class="bars">${bars}</div>${real}${histT}${farmT ? '' : playerActions(id, tid)}${farmActions(id)}`;
+  openModal(p.name, body, `<span class="abbr">${esc(tid === 'FA' ? (isRetired(id) ? 'RETIRED' : 'FREE AGENT') : farmT ? tid + ' MINORS' : tid)}</span>`);
 }
 function openProspect(id) {
   const p = P[id], org = farmOrg(id), mt = myTeam();
@@ -1173,6 +1176,9 @@ document.addEventListener('click', e => {
     case 'hsub': histSub = el.dataset.v; render(); break;
     case 'importopen': openImport(); break;
     case 'gsearch': openSearch(); break;
+    case 'multiopen': openMultiSim(); break;
+    case 'msgo': runMulti(+el.dataset.n); break;
+    case 'msstop': if (multi) { multi.stop = true; el.disabled = true; el.textContent = 'Stopping after this season…'; } break;
     case 'fbkind': { const t = $('#fbText'); if (t) fbDraft = t.value; fbKind = el.dataset.v; render(); break; }
     case 'fbsend': { const t = $('#fbText'); if (t) fbDraft = t.value; el.disabled = true; sendFeedback(); break; }
     case 'fbmore': fbSent = 0; render(); break;
@@ -1200,7 +1206,7 @@ document.addEventListener('click', e => {
     case 'watch': watchGame(i); break;
     case 'watchnext': playAndWatch(); break;
     case 'w-skip': if (wRun) { wRun.fast = true; clearTimeout(wRun.t); wRun.step(); } break;
-    case 'history': tab = 'league'; leagueSub = 'history'; histSub = el.dataset.v || 'book'; renderTabs(); render(); window.scrollTo(0, 0); break;
+    case 'history': closeModal(); tab = 'league'; leagueSub = 'history'; histSub = el.dataset.v || 'book'; renderTabs(); render(); window.scrollTo(0, 0); break;
     case 'pscat': psCat = el.dataset.v; render(); break;
     case 'odready': odReady(); break;
     case 'unvote': withdrawVote(); break;
@@ -1652,6 +1658,10 @@ async function openOffseason(opts) {
       }
       if (nf) await setFarm(nf);
     }
+    // players age a year; some free agents retire; the greats go to the Hall of Fame
+    const dres = runDynWinter(season, Object.keys(ex.pool).concat(freeAgents()), id => (ex.pool[id] && ex.pool[id].prev) || formerTeam(id) || playerTeam(id));
+    dres.retired.forEach(id => { delete ex.pool[id]; });
+    await saveDyn(dres.dyn);
     const fw = runFarmWinter(season, ex.teams);
     for (const t of TEAMS) {
       const nt = ex.teams[t.id];
@@ -1672,6 +1682,8 @@ async function openOffseason(opts) {
     S2.fa = { day: 0, prev };
     const n = Object.keys(ex.pool).length;
     S2.news.unshift([S2.day, `The offseason is open. ${n} players with expiring contracts are free agents.`, 'fa']);
+    const wp = dynNews(S2, dres, season);
+    wp.forEach(p => addNote('league', { icon: p.kind === 'hof' ? '🏛️' : '👋', title: 'Extra! ' + esc(p.head), body: esc(p.sub || ''), btn: ['paper', 'Read it', p.id] }));
     S = S2; invalidate();
     if (mode === 'local') saveLocal(); else await writeDoc('league/state', S);
     marketView = 'fa'; render();
@@ -1945,9 +1957,10 @@ function viewBusiness() {
     ${tvOpt('advance', 'Cash advance', `Get ${money(lt * 0.75)} today. Your local TV pays only 25% that season.`)}
     ${canTV ? '' : '<p class="small muted" style="margin:0">You can change it in the offseason or before Opening Day.</p>'}</div></section>`;
   // budgets
-  h += `<section class="card"><h2>Scouting &amp; player development</h2><div class="pad sliders">
+  h += `<section class="card"><h2>Scouting, development &amp; medical</h2><div class="pad sliders">
     ${slider('scout', 'Scouting', su.scout / 1e6, 0, FO.ERA.scoutMax / 1e6, SC() > 1 ? 1 : 0.25, money(su.scout) + ' a year', scoutNote(su.scout))}
-    ${slider('dev', 'Player development', b.dev / 1e6, 0, F.devMax / 1e6, SC() > 1 ? 1 : 0.25, money(b.dev) + ' a year', devNote(b.dev))}</div></section>`;
+    ${slider('dev', 'Player development', b.dev / 1e6, 0, F.devMax / 1e6, SC() > 1 ? 1 : 0.25, money(b.dev) + ' a year', devNote(b.dev))}
+    ${slider('med', 'Medical staff', b.med / 1e6, 0, F.devMax / 1e6, SC() > 1 ? 1 : 0.25, money(b.med) + ' a year', medNote(b.med))}</div></section>`;
   // projects
   const cash = cashOf(mt);
   h += `<section class="card"><h2>Ballpark projects<span class="sub">permanent · 3% a year upkeep</span></h2><div class="list">${Object.keys(FO.BUILDS).map(k => {
@@ -2012,11 +2025,12 @@ function bizInput(el, commit) {
   if (k === 'ads') { $('#adsv').textContent = money(v * 1e6) + ' a year'; }
   if (k === 'scout') { $('#scoutv').textContent = money(v * 1e6) + ' a year'; $('#scoutn').textContent = scoutNote(v * 1e6); }
   if (k === 'dev') { $('#devv').textContent = money(v * 1e6) + ' a year'; $('#devn').textContent = devNote(v * 1e6); }
+  if (k === 'med') { $('#medv').textContent = money(v * 1e6) + ' a year'; $('#medn').textContent = medNote(v * 1e6); }
   const pv = $('#bizprev'); if (pv && (k === 'tix' || k === 'conc' || k === 'park')) pv.innerHTML = previewText(mt, over);
   if (!commit) return;
   if (k === 'tix') teamWrite(mt, { price: v });
   else if (k === 'scout') teamWrite(mt, { scout: Math.round(v * 4) / 4 * 1e6 });
-  else if (k === 'ads' || k === 'dev') setBiz({ [k]: Math.round(v * 4) / 4 * 1e6 });
+  else if (k === 'ads' || k === 'dev' || k === 'med') setBiz({ [k]: Math.round(v * 4) / 4 * 1e6 });
   else if (k === 'conc') setBiz({ conc: Math.round(v * 100) / 100 });
   else if (k === 'park') setBiz({ park: v });
   void F;
@@ -2555,7 +2569,7 @@ function pnlOf(tid) {
   const f = S.fin[tid], g = (x) => f[x] || 0;
   const rev = [['Tickets', g(1)], ['Food & drinks', g(2)], ['Parking', g(9)], ['Merch, suites & sponsors', g(10)], ['TV, radio & national', g(3)]];
   if (g(14) > 0) rev.push(['Luxury tax share', g(14)]);
-  const exp = [['Player payroll', g(4)], ['Ballpark operations', g(5)], ['Promotions & marketing', g(11)], ['Scouting & development', g(8) + g(12)], ['Interest & upkeep', g(13)]];
+  const exp = [['Player payroll', g(4)], ['Ballpark operations', g(5)], ['Promotions & marketing', g(11)], ['Scouting & development', g(8) + g(12)], ['Medical staff', g(15)], ['Interest & upkeep', g(13)]];
   if (g(14) < 0) exp.push(['Luxury tax', -g(14)]);
   const R = rev.reduce((a, x) => a + x[1], 0), E = exp.reduce((a, x) => a + x[1], 0);
   return { rev, exp, R, E, op: R - E, one: adjNow(tid) };
@@ -3030,7 +3044,7 @@ const SPANS = [['game', 'Game'], ['series', 'Series'], ['week', 'Week'], ['month
 function spanDays(k) { const left = LEN() - (S ? S.day : 0); return Math.max(1, Math.min(left, k === 'game' ? 1 : k === 'series' ? seriesDays() : k === 'week' ? 7 : k === 'month' ? 30 : left)); }
 function openSpanPicker() {
   const body = `<div class="list">${SPANS.map(([k, l]) => `<button class="item spanopt${simSpan === k ? ' on' : ''}" type="button" data-act="span" data-v="${k}"><div class="nm"><b>Play ${l.toLowerCase()}</b><span class="s">${spanDays(k)} day${spanDays(k) > 1 ? 's' : ''}${k === 'series' ? ' · finish this series' : ''}</span></div>${simSpan === k ? '<span class="tag mine">Default</span>' : ''}</button>`).join('')}</div><p class="pad small muted" style="padding-top:10px">Your pick becomes the Play button's default.</p>`;
-  openModal('How far to play', body);
+  openModal('How far to play', body + (canMultiSim() ? `<div class="list"><button class="item spanopt" type="button" data-act="multiopen"><div class="nm"><b>Several seasons…</b><span class="s">Fast-forward years at a time. Solo leagues only.</span></div></button></div>` : ''));
 }
 
 // ---------- Recap ----------
@@ -3116,7 +3130,18 @@ function seriesPath(tid) {
 }
 function newPaper(kind, tid, f) {
   const s = tid ? S.std[tid] : null;
-  return Object.assign({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), kind, tid, season: seasonNo(), year: yearOf(seasonNo()), day: S.day, owner: tid ? ownerOf(tid) : null, rec: s ? [s[0], s[1]] : null, lead: tid ? teamLeaders(tid) : null }, f);
+  return Object.assign({ id: 'p' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6), kind, tid, season: seasonNo(), year: yearOf(seasonNo()), day: S.day, owner: tid ? ownerOf(tid) : null, rec: s ? [s[0], s[1]] : null, lead: tid ? teamLeaders(tid) : null, briefs: paperBriefs(tid) }, f);
+}
+// "Around the league": a few short items from the wire for the side column
+function paperBriefs(tid) {
+  const out = [];
+  const keys = new Set();
+  for (const n of (S && S.news) || []) {
+    if (n[2] === 'injury' || (tid && n[3] === tid)) continue;
+    const lo = n[1].toLowerCase(), k = /world series/.test(lo) ? 'ws' : /pennant/.test(lo) ? 'pen' : lo.replace(/[^a-z ]/g, '').split(' ').filter(w => w.length > 3).slice(0, 4).sort().join(' ');
+    if (keys.has(k) || out.includes(n[1])) continue; keys.add(k); out.push(n[1]); if (out.length >= 4) break;
+  }
+  return out;
 }
 // compare the league before and after a sim and write editions for the big moments
 function makePapers(pre) {
@@ -3174,6 +3199,8 @@ function paperArt(kind, tid) {
   if (kind === 'pennant' || kind === 'wsset') return frame(`<path d="M50 20v104" stroke="${ink}" stroke-width="4"/><path d="M52 24l110 26-110 26z" fill="#fffaf0" stroke="${ink}" stroke-width="3"/><text x="88" y="56" text-anchor="middle" font-family="serif" font-weight="900" font-size="20" fill="${ink}">${ab}</text>`);
   if (kind === 'clinch') return frame(`<g stroke="${ink}" stroke-width="7" stroke-linecap="round"><path d="M60 118L140 26"/><path d="M140 118L60 26"/></g><circle cx="100" cy="70" r="22" fill="#fffaf0" stroke="${ink}" stroke-width="3"/><path d="M86 56c8 6 8 22 0 28M114 56c-8 6-8 22 0 28" fill="none" stroke="${ink}" stroke-width="2"/>`);
   if (kind === 'missed') return frame(`<g fill="#fffaf0" stroke="${ink}" stroke-width="2.5">${[0, 1, 2, 3].map(r => [0, 1, 2, 3, 4, 5].map(c => `<rect x="${26 + c * 26}" y="${34 + r * 22}" width="20" height="14" rx="3"/>`).join('')).join('')}</g><path d="M30 26c20-14 120-14 140 0" fill="none" stroke="${ink}" stroke-width="3"/>`);
+  if (kind === 'hof') return frame(`<g fill="#fffaf0" stroke="${ink}" stroke-width="3"><path d="M40 52h120L100 22z"/><rect x="48" y="52" width="104" height="8"/><rect x="56" y="62" width="12" height="44"/><rect x="82" y="62" width="12" height="44"/><rect x="108" y="62" width="12" height="44"/><rect x="134" y="62" width="12" height="44"/><rect x="42" y="106" width="116" height="10"/></g>`);
+  if (kind === 'retire') return frame(`<g fill="#fffaf0" stroke="${ink}" stroke-width="3"><path d="M52 84c0-26 20-42 48-42s48 16 48 42z"/><path d="M40 84h128c0 8-6 12-14 12H54c-8 0-14-4-14-12z"/></g><path d="M100 42v42" stroke="${ink}" stroke-width="2"/><text x="100" y="124" text-anchor="middle" font-family="serif" font-style="italic" font-size="14" fill="${ink}">thanks for the memories</text>`);
   if (kind === 'month') return frame(`<g fill="#fffaf0" stroke="${ink}" stroke-width="3"><rect x="40" y="70" width="22" height="46"/><rect x="74" y="50" width="22" height="66"/><rect x="108" y="36" width="22" height="80"/><rect x="142" y="22" width="22" height="94"/></g><path d="M30 118h150" stroke="${ink}" stroke-width="3"/>`);
   return frame(`<circle cx="100" cy="70" r="44" fill="#fffaf0" stroke="${ink}" stroke-width="3"/><path d="M74 36c14 18 14 50 0 68M126 36c-14 18-14 50 0 68" fill="none" stroke="#b3261e" stroke-width="2.5" stroke-dasharray="4 3"/>`);
 }
@@ -3196,19 +3223,23 @@ function paperBody(p) {
     streak: () => `${city} can't lose. The club has won ${p.n} straight, climbing to ${rec}, ${esc(p.place || '')}.`,
     milestone: () => `${esc(p.star || '')} reached ${esc(p.stat || '')} for ${city}, the kind of season fans will talk about for years.`,
     month: () => `${esc(p.month || '')} is in the books, and ${city} stand ${rec}, ${esc(p.place || '')}.`,
+    hof: () => (p.hof || []).length > 1 ? `Cooperstown welcomes ${p.hof.length} new members this winter: ${esc(p.hof.map(h => h[0]).join(', '))}. Each made the kind of mark on the game that earns a bronze plaque.` : `${esc((p.hof || [['']])[0][0])} is a Hall of Famer. The voters made it official this winter, and the plaque is already being cast.`,
+    retire: () => `${esc(p.star || '')} is calling it a career.${p.line ? ` In this league alone: ${esc(p.line)}.` : ''} The clubhouse won't be the same.`,
   }[p.kind] || (() => ''))();
   return `<p class="lede">${P1}</p>${lp ? `<p>${esc(lp)}</p>` : ''}${gmLine ? `<p>${gmLine}</p>` : ''}`;
 }
 function paperHTML(p) {
   const city = TEAM[p.tid] ? TEAM[p.tid].city : '';
-  const side = p.path && p.path.length ? `<div class="pbox"><b>Road to the title</b>${p.path.map(x => `<div>${esc(x)}</div>`).join('')}</div>`
+  const brief = (p.briefs || []).length ? `<div class="pbox"><b>Around the league</b>${p.briefs.map(x => `<div>${esc(x)}</div>`).join('')}</div>` : '';
+  const side0 = p.hof ? `<div class="pbox"><b>The class</b>${p.hof.map(h => `<div>${esc(h[0])} · ${esc(h[1])} · peak ${h[2]}</div>`).join('')}</div>` : p.kind === 'retire' && (p.others || []).length ? `<div class="pbox"><b>Also retiring</b>${p.others.map(x => `<div>${esc(x)}</div>`).join('')}</div>` : '';
+  const side = side0 ? side0 : p.path && p.path.length ? `<div class="pbox"><b>Road to the title</b>${p.path.map(x => `<div>${esc(x)}</div>`).join('')}</div>`
     : p.table ? `<div class="pbox"><b>${esc(TEAM[p.tid].lg + ' ' + TEAM[p.tid].div)}</b><table>${p.table.map(([id, w, l, gb]) => `<tr class="${id === p.tid ? 'us' : ''}"><td>${esc(id)}</td><td>${w}-${l}</td><td>${gb ? gb.toFixed(1) : '—'}</td></tr>`).join('')}</table></div>`
       : p.lead && (p.lead.hr || p.lead.ace) ? `<div class="pbox"><b>By the numbers</b>${p.rec ? `<div>Record: ${p.rec[0]}-${p.rec[1]}</div>` : ''}${p.lead.hr ? `<div>${esc(p.lead.hr)}</div>` : ''}${p.lead.ace ? `<div>${esc(p.lead.ace)}</div>` : ''}</div>` : '';
   const date = p.kind === 'month' ? `${p.month} ${p.year}` : p.day > 0 && p.day <= LEN() ? FO.dateOf(Math.min(161, p.day - 1)) + ', ' + p.year : 'October ' + p.year;
   return `<article class="paper"><header class="mast"><div class="mtop"><span>${esc(city ? city + ' edition' : 'League edition')}</span><span>${esc(date)}</span><span>Season ${p.season}</span></div><h1>${PAPER}</h1><div class="mrule"></div></header>
     <h2 class="hl">${esc(p.head)}</h2><div class="dek">${esc(p.sub)}</div>
-    <div class="pcols"><figure>${paperArt(p.kind, p.tid)}<figcaption>${esc(p.kind === 'champ' ? 'The trophy heads home.' : p.kind === 'missed' ? 'Empty seats at the ballpark.' : p.kind === 'month' ? 'Climbing the standings.' : p.kind === 'pennant' || p.kind === 'wsset' ? 'Flying the flag.' : 'Dispatch staff illustration.')}</figcaption></figure>
-    <div class="ptext">${paperBody(p)}${side}</div></div>
+    <div class="pcols"><figure>${paperArt(p.kind, p.tid)}<figcaption>${esc(p.kind === 'champ' ? 'The trophy heads home.' : p.kind === 'missed' ? 'Empty seats at the ballpark.' : p.kind === 'month' ? 'Climbing the standings.' : p.kind === 'pennant' || p.kind === 'wsset' ? 'Flying the flag.' : p.kind === 'hof' ? 'The hall in Cooperstown.' : p.kind === 'retire' ? 'Hanging up the cap.' : 'Dispatch staff illustration.')}</figcaption></figure>
+    <div class="ptext">${paperBody(p)}${side}${brief}</div></div>
     <footer class="pfoot">${PAPER} · fictional league coverage · ${p.year}</footer></article>`;
 }
 function openPaper(id) {
@@ -3232,7 +3263,7 @@ function unseenPaper(mt) {
   const ps = (S && S.papers) || []; if (!ps.length) return null;
   let seen = null; try { seen = localStorage.getItem(seenKey()); } catch (e) { /* ignore */ }
   const idx = seen ? ps.findIndex(p => p.id === seen) : -1;
-  const fresh = ps.slice(idx + 1).filter(p => p.tid === mt || p.kind === 'champ' || p.kind === 'wsset');
+  const fresh = ps.slice(idx + 1).filter(p => p.tid === mt || p.kind === 'champ' || p.kind === 'wsset' || p.kind === 'hof' || p.kind === 'retire');
   return fresh.length ? fresh[fresh.length - 1] : null;
 }
 
@@ -3759,8 +3790,8 @@ function viewBook() {
   }).join('')}</div></section>`;
 }
 function viewHistory() {
-  const seg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg" role="group" aria-label="History"><button type="button" data-act="hsub" data-v="book" aria-pressed="${histSub === 'book'}">Record book</button><button type="button" data-act="hsub" data-v="career" aria-pressed="${histSub === 'career'}">Your career</button></div></div></section>`;
-  return seg + (histSub === 'career' ? viewCareer() : viewBook() + viewPastRaces());
+  const seg = `<section class="card"><div class="pad" style="padding-top:12px"><div class="seg" role="group" aria-label="History"><button type="button" data-act="hsub" data-v="book" aria-pressed="${histSub === 'book'}">Record book</button><button type="button" data-act="hsub" data-v="career" aria-pressed="${histSub === 'career'}">Your career</button><button type="button" data-act="hsub" data-v="hof" aria-pressed="${histSub === 'hof'}">Hall of Fame</button></div></div></section>`;
+  return seg + (histSub === 'career' ? viewCareer() : histSub === 'hof' ? viewHof() : viewBook() + viewPastRaces());
 }
 
 // ---------------- Live games: watch any game a GM's club played ----------------
@@ -4396,6 +4427,139 @@ function viewFeedback() {
   return h;
 }
 
+// ---------------- Dynasty: aging, retirements, the Hall of Fame, medical staff, multi-season sims ----------------
+// league/dyn holds every player's rating change since the league began, careers in this league, retirements and
+// the Hall of Fame. The commissioner's client writes it once a winter when the offseason opens.
+let dyn = null;
+function dynSig() { return meta ? String(meta.created || meta.seed) : ''; }
+function dynLive() { return !!(dyn && W && dyn.lid === dynSig() && dyn.era === curEra); }
+function dynSeed() { return (Number((meta && (meta.created || meta.seed)) || 1) % 4294967296) >>> 0; }
+function isRetired(id) { return dynLive() && dyn.ret && dyn.ret[id] != null; }
+function hofEntry(id) { return dynLive() ? (dyn.hof || []).find(h => h.id === +id) || null : null; }
+function applyDynNow() {
+  try { if (!W) return; FO.applyDyn(W, dynLive() ? dyn : null); } catch (e) { /* not loaded yet, or keep base ratings */ }
+  try { invalidate(); anaCache = null; raceProjCache = null; builder = null; } catch (e) { /* caches not ready yet */ }
+}
+function saveDyn(d) {
+  dyn = d; applyDynNow();
+  if (mode === 'local') { saveLocal(); return Promise.resolve(); }
+  return writeDoc('league/dyn', d).catch(() => {});
+}
+// the winter step, run while opening the offseason. cands = free agents who might retire.
+function runDynWinter(season, cands, prevOf) {
+  const base = dynLive() ? dyn : { lid: dynSig(), era: curEra };
+  const r = FO.winterDyn(W, base, S, season, dynSeed(), [...new Set(cands.map(Number))], { lastTeam: id => prevOf(id) || null });
+  r.dyn.lid = dynSig(); r.dyn.era = curEra;
+  return r;
+}
+const lastOf = n => String(n).split(' ').filter(x => !/^(Jr\.|Sr\.|II|III)$/.test(x)).pop();
+function careerLine(id) {
+  const c = dynLive() && dyn.car && dyn.car[id]; if (!c) return '';
+  const p = P[id];
+  if (p.t === 'H') return `${c[0]} season${c[0] > 1 ? 's' : ''}, ${c[2] ? fmt3(c[3] / c[2]) : '.000'}, ${c[4]} HR, ${c[5]} RBI, ${c[3]} hits`;
+  return `${c[0]} season${c[0] > 1 ? 's' : ''}, ${c[2]}-${c[3]}, ${c[5] ? (c[7] * 27 / c[5]).toFixed(2) : '0.00'} ERA, ${c[6]} K${c[4] ? ', ' + c[4] + ' saves' : ''}`;
+}
+// news and front pages for the winter
+function dynNews(S2, r, season) {
+  const yr = yearOf(season + 1);
+  const notable = r.retired.slice().sort((a, b) => FO.hofScore(W, r.dyn, b) - FO.hofScore(W, r.dyn, a));
+  notable.slice(0, 6).reverse().forEach(id => { const p = P[id]; S2.news.unshift([S2.day, `${p.name} retires at ${p.age}${careerLine(id) ? ' after ' + careerLine(id) + ' in this league' : ''}.`, 'tx']); });
+  if (r.retired.length) S2.news.unshift([S2.day, `${r.retired.length} player${r.retired.length > 1 ? 's' : ''} announced ${r.retired.length > 1 ? 'their' : 'his'} retirement this winter.`, 'tx']);
+  r.inducted.slice().reverse().forEach(e => S2.news.unshift([S2.day, `Hall of Fame: ${e.name} is inducted with the class of ${yr}.`, 'milestone']));
+  const papers = [];
+  if (r.inducted.length) papers.push(newPaper('hof', null, { head: r.inducted.length > 1 ? `CLASS OF ${yr}` : `${lastOf(r.inducted[0].name).toUpperCase()} HEADS TO THE HALL`, sub: r.inducted.length > 1 ? `${r.inducted.map(e => e.name).join(', ')} enter the Hall of Fame` : `${r.inducted[0].name} enters the Hall of Fame with the class of ${yr}`, hof: r.inducted.map(e => [e.name, e.pos, e.peak, e.id]), owner: null }));
+  const inHof = new Set(r.inducted.map(e => e.id)), star = notable.find(id => !inHof.has(id));
+  if (star != null && (P[star].ovr >= 60 || FO.hofScore(W, r.dyn, star) >= 30)) papers.push(newPaper('retire', null, { head: `FAREWELL, ${lastOf(P[star].name).toUpperCase()}`, sub: `${P[star].name} hangs up the spikes at ${P[star].age}`, star: P[star].name, starId: star, line: careerLine(star), others: notable.filter(id => id !== star).slice(0, 5).map(id => P[id].name + (inHof.has(id) ? ' (Hall of Fame)' : '')), owner: null }));
+  if (papers.length) S2.papers = (S2.papers || []).concat(papers).slice(-40);
+  return papers;
+}
+// ---- Hall of Fame page ----
+function viewHof() {
+  if (!dynLive() || !(dyn.hof || []).length) {
+    const ret = dynLive() ? Object.keys(dyn.ret || {}).length : 0;
+    return `<section class="card"><h2>Hall of Fame</h2><div class="empty">No one has been inducted yet. Every winter, players whose contracts are up may retire, and the greats go straight to the Hall.${ret ? ` ${ret} have retired so far.` : ''}</div></section>` + retiredCard();
+  }
+  const list = dyn.hof.slice().reverse();
+  return `<section class="card"><h2>Hall of Fame<span class="sub">${list.length} inducted</span></h2><div class="hofgrid">${list.map(e => `<button class="plaque" type="button" data-act="player" data-p="${e.id}"><span class="py">Class of ${e.y}</span><b>${esc(e.name)}</b><span class="pp">${esc(e.pos)}${e.last && TEAM[e.last] ? ' · ' + esc(TEAM[e.last].city) : ''}</span>${careerLine(e.id) ? `<span class="pc2">${esc(careerLine(e.id))} in this league</span>` : '<span class="pc2">Made his name before this league began</span>'}<span class="pk">Peak rating ${e.peak}</span></button>`).join('')}</div></section>` + retiredCard();
+}
+function retiredCard() {
+  if (!dynLive()) return '';
+  const ids = Object.keys(dyn.ret || {}).map(Number).filter(id => P[id]);
+  if (!ids.length) return '';
+  const by = ids.sort((a, b) => dyn.ret[b] - dyn.ret[a] || FO.hofScore(W, dyn, b) - FO.hofScore(W, dyn, a)).slice(0, 40);
+  return `<section class="card"><h2>Recently retired<span class="sub">${ids.length} in all</span></h2><div class="list">${by.map(id => `<div class="item"><span class="slot" style="width:44px">${yearOf(dyn.ret[id] + 1)}</span><div class="nm"><button class="lnk" type="button" data-act="player" data-p="${id}"><b>${esc(P[id].name)}</b></button>${hofEntry(id) ? ' <span class="tag gold">Hall of Fame</span>' : ''}<span class="s">${posShort(P[id])} · retired at ${P[id].age}${careerLine(id) ? ' · ' + esc(careerLine(id)) : ''}</span></div></div>`).join('')}</div></section>`;
+}
+// ---- player card extras ----
+function dynPlayerBits(id) {
+  if (!dynLive()) return '';
+  const bits = [];
+  const h = hofEntry(id);
+  if (h) bits.push(`<span class="tag gold">Hall of Fame · class of ${h.y}</span>`);
+  else if (isRetired(id)) bits.push(`<span class="tag">Retired after ${yearOf(dyn.ret[id])}</span>`);
+  const p = P[id], d = dyn.d && dyn.d[id];
+  if (p && p.b0 && d && !p.pros) bits.push(`<span class="small muted">${d > 0 ? 'Up' : 'Down'} ${Math.abs(d)} from his ${FO.ERA.year} rating of ${p.b0.ovr}</span>`);
+  const cl = careerLine(id);
+  return `${bits.length ? `<div class="pad row wrap" style="padding-top:10px;gap:6px;align-items:center">${bits.join('')}</div>` : ''}${cl ? `<p class="pad small" style="padding-top:6px;margin:0"><b>Career in this league:</b> ${esc(cl)}.</p>` : ''}`;
+}
+// ---- medical staff ----
+function medNote(v) {
+  const f = Math.max(0, Math.min(1, v / FO.ERA.fin.devMax)), r = FO.medRisk(f), d = FO.medDays(f);
+  const often = Math.round((r - 1) * 100), back = Math.round((1 - d) * 100);
+  return `${often > 2 ? `Injuries about ${often}% more often` : often < -2 ? `Injuries about ${-often}% less often` : 'Normal injury risk'}${back > 2 ? `, players back ${back}% sooner` : back < -2 ? `, recoveries ${-back}% slower` : ''}.`;
+}
+// ---- several seasons at once (solo leagues only) ----
+let multi = null;
+// if the app closed in the middle of a multi-season sim, give the club back
+function restoreMultiOwner() {
+  const t = localGet('ms-team'); if (multi || !t || !TEAM[t] || myTeam()) return;
+  localSet('ms-team', ''); if (!ownerOf(t)) teamWrite(t, { owner: me.id });
+}
+function canMultiSim() { return !!(meta && S && (mode === 'local' || league.kind === 'solo') && isCommish()); }
+function openMultiSim() {
+  if (!canMultiSim()) { toast('Multi-season sims are for solo leagues, so nobody fast-forwards a friend\'s club.'); return; }
+  const mt = myTeam(), city = mt ? TEAM[mt].city : 'your club';
+  openModal('Sim several seasons', `<div class="pad"><p style="margin:0 0 10px">Watch the years fly by. Your assistant GM runs <b>${esc(city)}</b> the whole way: lineups, call-ups, the business, the draft and free agency. Players age, stars retire, and the greats go to the Hall of Fame.</p>
+    <div class="msgrid">${[1, 3, 5, 10].map(n => `<button class="btn${n === 5 ? ' primary' : ''}" type="button" data-act="msgo" data-n="${n}">${n} season${n > 1 ? 's' : ''}</button>`).join('')}</div>
+    <p class="small muted" style="margin:10px 0 0">You can stop after any season. ${S.phase === 'season' && S.day > 0 ? 'The current season finishes first and counts as one.' : ''}</p></div>`);
+}
+function paintMulti(label) {
+  const m = $('#msprog'); if (!m || !multi) return;
+  m.innerHTML = `<b>Season ${Math.min(multi.total, multi.done + 1)} of ${multi.total}</b> · ${esc(label || '')}<div class="msbar"><i style="width:${Math.round(multi.done / multi.total * 100)}%"></i></div>`;
+}
+async function runMulti(n) {
+  if (multi || !canMultiSim()) return;
+  const mt = myTeam(), keepAuto = mt ? clone((docs[mt] && docs[mt].auto) || {}) : null;
+  const start = { season: seasonNo(), hof: dynLive() ? (dyn.hof || []).length : 0, ret: dynLive() ? Object.keys(dyn.ret || {}).length : 0 };
+  multi = { total: n, done: 0, stop: false, rows: [] };
+  openModal('Simulating seasons', `<div class="pad"><div id="msprog"></div><div class="row" style="margin-top:12px"><button class="btn" type="button" data-act="msstop">Stop after this season</button></div></div>`);
+  paintMulti('Getting started');
+  // the computer runs your club for the stretch (trades, re-signings, free agency), then hands it back
+  if (mt) { localSet('ms-team', mt); await teamWrite(mt, { owner: null }); }
+  let guard = 0;
+  try {
+    while (multi.done < multi.total && guard++ < 400) {
+      const ph = S.phase, sn = seasonNo();
+      paintMulti(`${yearOf(sn)} ${ph === 'season' ? 'regular season' : ph === 'post' ? 'postseason' : 'offseason'}`);
+      if (ph === 'season') await sim(Math.max(1, LEN() - S.day), { auto: true });
+      else if (ph === 'post') await sim(999, { auto: true });
+      else if (ph === 'done') { await ensureBook().catch(() => {}); if (mt) multi.rows.push({ y: yearOf(sn), w: S.std[mt][0], l: S.std[mt][1], post: postLabel(mt), champ: S.post && S.post.champ }); await openOffseason({ auto: true }); }
+      else if (ph === 'offseason') {
+        if (faDay() < FA_DAYS) await marketDay(false, { auto: true });
+        else { await marketDay(true, { auto: true }); multi.done++; if (multi.stop) break; }
+      }
+      if (S.phase === ph && seasonNo() === sn && ph !== 'offseason' && ph !== 'season') break; // nothing moved: stop rather than spin
+      await new Promise(r => setTimeout(r, 0));
+    }
+  } finally {
+    if (mt) { await teamWrite(mt, { owner: me.id, auto: keepAuto }); localSet('ms-team', ''); }
+    const res = multi; multi = null; closeModal(); render();
+    const newHof = dynLive() ? (dyn.hof || []).slice(start.hof) : [], newRet = dynLive() ? Object.keys(dyn.ret || {}).length - start.ret : 0;
+    openModal(`${res.done} season${res.done === 1 ? '' : 's'} in the books`, `<div class="pad">${res.rows.length ? `<div class="scroll"><table><thead><tr><th>Year</th><th>${esc(mt || '')}</th><th>Finish</th><th>Champion</th></tr></thead><tbody>${res.rows.map(r => `<tr><td>${r.y}</td><td>${r.w}-${r.l}</td><td>${esc(r.post || '')}</td><td>${r.champ ? esc(TEAM[r.champ].city) : '—'}</td></tr>`).join('')}</tbody></table></div>` : ''}
+      <p style="margin:12px 0 0">${newRet} player${newRet === 1 ? '' : 's'} retired${newHof.length ? `, and ${newHof.length} went into the Hall of Fame: ${newHof.map(e => esc(e.name)).join(', ')}` : ''}.</p>
+      <div class="row wrap" style="margin-top:12px"><button class="btn primary" type="button" data-act="history" data-v="hof">See the Hall of Fame</button><button class="btn" type="button" data-act="close">Close</button></div></div>`);
+  }
+}
+
 // ---------------- In the red: recovery plan ----------------
 // Ranks every way to get cash positive (instant cash, ongoing savings) with one-tap Apply buttons,
 // plus "Apply the recovery plan" for the safe combination: revenue tweaks, budget trims, and a loan for what's left.
@@ -4736,11 +4900,11 @@ function viewOffice() {
     <div class="kv"><div><span>Cash balance</span><b>${money(cashOf(mt))}</b></div><div><span>Payroll</span><b>${money(payroll(mt))}</b></div><div><span>Last 7 days revenue</span><b>${money(wk.rev)}</b></div><div><span>Last 7 days net</span><b style="color:${wk.net >= 0 ? 'var(--good)' : 'var(--bad)'}">${money(wk.net)}</b></div></div>
     <div class="pad row" style="padding-top:12px;align-items:center">${spark}<span class="small muted" style="flex:1;min-width:0">${esc(hd)}</span></div></section>`;
   // ledger
-  const rev = f[1] + f[2] + f[3] + (f[9] || 0) + (f[10] || 0) + Math.max(0, f[14] || 0), exp = f[4] + f[5] + (f[8] || 0) + (f[11] || 0) + (f[12] || 0) + (f[13] || 0) - Math.min(0, f[14] || 0), avg = f[7] ? Math.round(f[6] / f[7]) : 0;
+  const rev = f[1] + f[2] + f[3] + (f[9] || 0) + (f[10] || 0) + Math.max(0, f[14] || 0), exp = f[4] + f[5] + (f[8] || 0) + (f[11] || 0) + (f[12] || 0) + (f[13] || 0) + (f[15] || 0) - Math.min(0, f[14] || 0), avg = f[7] ? Math.round(f[6] / f[7]) : 0;
   h += `<section class="card"><h2>Season ledger<span class="sub">Avg crowd ${avg.toLocaleString()} of ${t.cap.toLocaleString()}</span></h2><div class="scroll"><table><tbody>
       <tr><td>Ticket sales</td><td>${money(f[1])}</td></tr><tr><td>Food &amp; drinks</td><td>${money(f[2])}</td></tr><tr><td>Parking</td><td>${money(f[9] || 0)}</td></tr><tr><td>Merch, suites &amp; sponsors</td><td>${money(f[10] || 0)}</td></tr><tr><td>TV, radio &amp; national revenue</td><td>${money(f[3])}</td></tr>${(f[14] || 0) > 0 ? `<tr><td>Luxury tax share</td><td>${money(f[14])}</td></tr>` : ''}
       <tr><td><b>Revenue</b></td><td><b>${money(rev)}</b></td></tr>
-      <tr><td>Player payroll paid</td><td>−${money(f[4])}</td></tr><tr><td>Stadium &amp; operations</td><td>−${money(f[5])}</td></tr><tr><td>Promotions &amp; marketing</td><td>−${money(f[11] || 0)}</td></tr><tr><td>Scouting &amp; development</td><td>−${money((f[8] || 0) + (f[12] || 0))}</td></tr>${f[13] ? `<tr><td>Loan interest &amp; upkeep</td><td>−${money(f[13])}</td></tr>` : ''}${(f[14] || 0) < 0 ? `<tr><td>Luxury tax paid</td><td>−${money(-f[14])}</td></tr>` : ''}${adjNow(mt) ? `<tr><td>Signings, trades, projects &amp; TV advance</td><td>${money(adjNow(mt))}</td></tr>` : ''}
+      <tr><td>Player payroll paid</td><td>−${money(f[4])}</td></tr><tr><td>Stadium &amp; operations</td><td>−${money(f[5])}</td></tr><tr><td>Promotions &amp; marketing</td><td>−${money(f[11] || 0)}</td></tr><tr><td>Scouting &amp; development</td><td>−${money((f[8] || 0) + (f[12] || 0))}</td></tr>${f[15] ? `<tr><td>Medical staff</td><td>−${money(f[15])}</td></tr>` : ''}${f[13] ? `<tr><td>Loan interest &amp; upkeep</td><td>−${money(f[13])}</td></tr>` : ''}${(f[14] || 0) < 0 ? `<tr><td>Luxury tax paid</td><td>−${money(-f[14])}</td></tr>` : ''}${adjNow(mt) ? `<tr><td>Signings, trades, projects &amp; TV advance</td><td>${money(adjNow(mt))}</td></tr>` : ''}
       <tr><td><b>Profit this season</b></td><td><b style="color:${rev - exp + adjNow(mt) >= 0 ? 'var(--good)' : 'var(--bad)'}">${money(rev - exp + adjNow(mt))}</b></td></tr></tbody></table></div></section>`;
   const ros = su.roster.slice().sort((a, b) => salFor(b, mt) - salFor(a, mt));
   h += `<section class="card"><h2>Biggest contracts</h2><div class="list">${ros.slice(0, 8).map(id => `<div class="item"><span class="${ovrClass(P[id].ovr)}">${P[id].ovr}</span><div class="nm"><button class="lnk" type="button" data-act="player" data-p="${id}"><b>${esc(P[id].name)}</b></button>${ilTag(id)}<span class="s">${posShort(P[id])} · age ${P[id].age} · through ${yearOf(endFor(id, mt))}</span></div><span class="num">${money(salFor(id, mt))}</span></div>`).join('')}</div></section>`;

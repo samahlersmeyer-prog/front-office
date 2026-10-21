@@ -4647,18 +4647,23 @@ async function resetLeague(era, el, ropts) {
     }
     docs = nd;
     const locked = meta && meta.locked, openSim = meta && meta.openSim;
-    const keepLen = meta && meta.len;
-    await startLeague(era, { locked, openSim, quiet: true, len: keepLen, keepPost: true });
+    const rl = document.getElementById('resetLen'), keepLen = rl ? +rl.value : meta && meta.len;
+    await startLeague(era, { locked, openSim, quiet: true, len: keepLen, post: resetPf || (meta && meta.post) || null });
     closeModal(); tab = 'desk'; renderTabs(); render(); window.scrollTo(0, 0);
     toast('New league started with ' + (era === '1997' ? '1997' : '2026') + ' rosters.' + (keep ? '' : ' Pick your club.'));
     if (!keep) setTimeout(() => openClaim(), 300);
   } finally { busy = false; }
 }
+let resetPf = null;
+function resetPfHTML() { return pfChooser(resetPf, 'pfpickr') + pfInfo(resetPf); }
 function openReset() {
   if (!isCommish()) return;
+  resetPf = postFmt();
   const where = mode === 'local' ? 'this device' : league.kind === 'solo' ? 'your solo league' : esc(leagueLabel());
   openModal('Start over', `<div class="pad" style="padding-top:12px;display:grid;gap:12px"><p class="small" style="margin:0">This wipes <b>${where}</b>: standings, stats, trades, contracts, money, the farm and the GM Race for this season. Other leagues aren't touched.</p>
     <label class="sw"><span class="nm"><b>Keep everyone on their clubs</b><span class="s">Off: everyone, you included, picks a club again after the reset.</span></span><input type="checkbox" role="switch" id="keepClubs" ${TEAMS.filter(t => ownerOf(t.id)).length > 1 ? 'checked' : ''}><i aria-hidden="true"></i></label>
+    <label class="small" style="display:grid;gap:4px;max-width:280px"><b>Season length</b><select id="resetLen">${SEASON_LENS.map(([v, l]) => `<option value="${v}" ${v === ((meta && meta.len) || 162) ? 'selected' : ''}>${l}</option>`).join('')}</select></label>
+    <div><div class="small" style="margin-bottom:6px"><b>Playoff format</b></div><div id="resetPf">${resetPfHTML()}</div></div>
     <p class="small muted" style="margin:0">Tap a button twice to confirm.</p>
     <div class="row wrap"><button class="btn primary" type="button" data-act="reset" data-era="2026">New season, 2026 rosters</button><button class="btn" type="button" data-act="reset" data-era="1997">New season, 1997 rosters</button></div></div>`);
 }
@@ -4667,7 +4672,7 @@ async function startLeague(era, opts) {
   initWorld(era);
   const seed = (Math.random() * 4294967295) >>> 0;
   opts = opts || {};
-  meta = { commish: me.id, seed, created: Date.now(), openSim: !!opts.openSim, locked: !!opts.locked, season: 1, era, len: opts.len || 162, post: pfPick || (meta && meta.post && opts.keepPost ? meta.post : eraFmt(era)) };
+  meta = { commish: me.id, seed, created: Date.now(), openSim: !!opts.openSim, locked: !!opts.locked, season: 1, era, len: opts.len || 162, post: (PFMT[opts.post] ? opts.post : null) || pfPick || eraFmt(era) };
   const lenSel = document.getElementById('lenSel'); if (lenSel) meta.len = +lenSel.value;
   S = FO.newState(seed, meta.len || 162); box = { day: 0, games: [] };
   farm = null; farmLoaded = true; syncFarm();
@@ -5531,6 +5536,7 @@ document.addEventListener('click', e => {
     case 'gsearch': openSearch(); break;
     case 'pfpick': pfPick = pfPick === el.dataset.v ? null : el.dataset.v; render(); break;
     case 'pfset': setPostFmt(el.dataset.v); break;
+    case 'pfpickr': { resetPf = el.dataset.v; const b = $('#resetPf'); if (b) b.innerHTML = resetPfHTML(); break; }
     case 'multiopen': openMultiSim(); break;
     case 'msgo': runMulti(+el.dataset.n); break;
     case 'msstop': if (multi) { multi.stop = true; el.disabled = true; el.textContent = 'Stopping after this season…'; } break;
